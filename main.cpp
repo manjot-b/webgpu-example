@@ -1,8 +1,11 @@
 #include <iostream>
+
 #include <GLFW/glfw3.h>
+#include <webgpu/webgpu.h>
 
 int main (int, char**)
 {
+	// Setup GLFW
 	glfwInit();
 
 	if (!glfwInit())
@@ -18,11 +21,27 @@ int main (int, char**)
 		return 1;
 	}
 
+	std::cout << "GLFW initialized successfully: " << window << std::endl;
+
+	// Setup WebGPU
+	WGPUInstanceDescriptor desc = {};
+	desc.nextInChain = nullptr;
+	WGPUInstance instance = wgpuCreateInstance(&desc);
+
+	if (!instance)
+	{
+		std::cerr << "Could not initialize WebGPU" << std::endl;
+		return 1;
+	}
+	std::cout << "WebGPU initialized successfully: " << instance << std::endl;
+
 	while (!glfwWindowShouldClose(window))
 	{
 		glfwPollEvents();
 	}
 
+	// cleanup
+	wgpuInstanceRelease(instance);
 	glfwDestroyWindow(window);
 	glfwTerminate();
 	return 0;

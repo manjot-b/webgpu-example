@@ -24,3 +24,4 @@ if(XCODE)
 endif()
 
 add_subdirectory(submodules)
+target_copy_webgpu_binaries(app)
