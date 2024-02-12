@@ -4,3 +4,6 @@
 [submodule "submodules/webgpu"]
 	path = submodules/webgpu
 	url = https://github.com/eliemichel/WebGPU-distribution.git
+[submodule "submodules/glfw3webgpu"]
+	path = submodules/glfw3webgpu
+	url = https://github.com/eliemichel/glfw3webgpu.git
