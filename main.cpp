@@ -24,6 +24,16 @@ int main (int, char**)
 	std::cout << "GLFW initialized successfully: " << window << std::endl;
 
 	// Setup WebGPU
+#if defined(WEBGPU_BACKEND_DAWN)
+	std::cout << "Dawn backend detected" << std::endl;
+#elif defined(WEBGPU_BACKEND_WGPU)
+	std::cout << "WGPU backend detected" << std::endl;
+#elif defined(WEBGPU_BACKEND_EMSCRIPTEN)
+	std::cout << "Emscripten backend detected" << std::endl;
+#else
+	#error "No valid WebGPU backend detected"
+#endif
+
 	WGPUInstanceDescriptor desc = {};
 	desc.nextInChain = nullptr;
 	WGPUInstance instance = wgpuCreateInstance(&desc);
