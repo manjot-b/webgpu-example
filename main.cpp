@@ -85,8 +85,32 @@ int main (int, char**)
 		return 1;
 	}
 	std::cout << "Got adapter: " << adapter << std::endl;
-
 	printAdapterFeatures(adapter);
+
+	// Use adapter to and device description to retrieve a device
+	WGPUDeviceDescriptor deviceDesc;
+	deviceDesc.nextInChain = nullptr;
+	deviceDesc.label = "My Device";
+	deviceDesc.requiredFeaturesCount = 0;
+	deviceDesc.requiredLimits = nullptr;
+	deviceDesc.defaultQueue.nextInChain = nullptr;
+	deviceDesc.defaultQueue.label = "Default Queue";
+
+	WGPUDevice device = wgpuUtils::requestDevice(adapter, &deviceDesc);
+	if (!device)
+	{
+		std::cerr << "Could not retrieve device" << std::endl;
+		return 1;
+	}
+
+	auto onDeviceError = [](WGPUErrorType type, char const* message, void* /*pUserData*/)
+	{
+		std::cout << "Uncaptured device error: type " << type;
+		if (message)
+			std::cout << " (" << message << ")";
+		std::cout << std::endl;
+	};
+	wgpuDeviceSetUncapturedErrorCallback(device, onDeviceError, nullptr);
 
 	while (!glfwWindowShouldClose(window))
 	{
@@ -94,6 +118,7 @@ int main (int, char**)
 	}
 
 	// cleanup
+	wgpuDeviceRelease(device);
 	wgpuSurfaceRelease(surface);
 	wgpuAdapterRelease(adapter);
 	wgpuInstanceRelease(instance);
