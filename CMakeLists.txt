@@ -3,7 +3,11 @@ project(LearnWebGPU
 	LANGUAGES CXX C
 )
 
-add_executable(app main.cpp)
+add_executable(app
+	main.cpp
+	webgpu-utils.cpp
+	webgpu-utils.hpp
+)
 
 set_target_properties(app PROPERTIES
 	CMAKE_CXX_STANDARD 17

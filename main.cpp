@@ -1,5 +1,3 @@
-#include "build/wgpu/_deps/webgpu-backend-wgpu-src/include/webgpu/webgpu.h"
-#include <cassert>
 #include <iostream>
 #include <vector>
 
@@ -7,38 +5,7 @@
 #include <webgpu/webgpu.h>
 #include <glfw3webgpu.h>
 
-WGPUAdapter requestAdapter(WGPUInstance instance, const WGPURequestAdapterOptions* options)
-{
-	/**
-	 * Holds local information shared with the onAdapterRequestEnded callback
-	 */
-	struct UserData
-	{
-		WGPUAdapter adapter = nullptr;
-		bool requestEnded = false;
-	} userData;
-
-	auto onAdapterRequestEnded = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, const char* message, void* pUserData)
-	{
-		UserData& userData = *reinterpret_cast<UserData*>(pUserData);
-		if (status == WGPURequestAdapterStatus_Success)
-		{
-			userData.adapter = adapter;
-		}
-		else
-		{
-			std::cerr << "Could not retrieve WebGPU adapter: " << message << std::endl;
-		}
-		userData.requestEnded = true;
-	};
-
-	wgpuInstanceRequestAdapter(instance, options, onAdapterRequestEnded, static_cast<void*>(&userData));
-
-	// The callback is called synchronously so the following assert should never fire.
-	assert(userData.requestEnded);
-
-	return userData.adapter;
-}
+#include "webgpu-utils.hpp"
 
 void printAdapterFeatures(WGPUAdapter adapter)
 {
@@ -111,7 +78,7 @@ int main (int, char**)
 	adapterOptions.nextInChain = nullptr;
 	adapterOptions.compatibleSurface = surface;
 
-	WGPUAdapter adapter = requestAdapter(instance, &adapterOptions);
+	WGPUAdapter adapter = wgpuUtils::requestAdapter(instance, &adapterOptions);
 	if (!adapter)
 	{
 		std::cerr << "Could not retrieve adapter" << std::endl;
