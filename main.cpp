@@ -7,19 +7,6 @@
 
 #include "webgpu-utils.hpp"
 
-void printAdapterFeatures(WGPUAdapter adapter)
-{
-	std::vector<WGPUFeatureName> features;
-	size_t featureCount = wgpuAdapterEnumerateFeatures(adapter, nullptr);
-	features.resize(featureCount);
-	wgpuAdapterEnumerateFeatures(adapter, features.data());
-
-	std::cout << "Adapter features:" << std::endl;
-	for (auto f : features)
-	{
-		std::cout << "-" << f << std::endl;
-	}
-}
 
 int main (int, char**)
 {
@@ -85,7 +72,7 @@ int main (int, char**)
 		return 1;
 	}
 	std::cout << "Got adapter: " << adapter << std::endl;
-	printAdapterFeatures(adapter);
+	wgpuUtils::printAdapterFeatures(adapter);
 
 	// Use adapter to and device description to retrieve a device
 	WGPUDeviceDescriptor deviceDesc;

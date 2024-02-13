@@ -73,4 +73,18 @@ WGPUDevice requestDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor* descri
 	return userData.device;
 }
 
+void printAdapterFeatures(WGPUAdapter adapter)
+{
+	std::vector<WGPUFeatureName> features;
+	size_t featureCount = wgpuAdapterEnumerateFeatures(adapter, nullptr);
+	features.resize(featureCount);
+	wgpuAdapterEnumerateFeatures(adapter, features.data());
+
+	std::cout << "Adapter features:" << std::endl;
+	for (auto f : features)
+	{
+		std::cout << "-" << f << std::endl;
+	}
+}
+
 } // namespace utils
