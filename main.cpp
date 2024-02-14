@@ -15,9 +15,16 @@ struct WGPUContext
 	WGPUAdapter adapter;
 	WGPUDevice device;
 	WGPUSurface surface;
+	WGPUQueue queue;
+	WGPUCommandEncoder encoder;
 
 	~WGPUContext()
 	{
+		std::cout << "Releasing WebGPU context" << std::endl;
+
+		// Works on wgpu?
+		wgpuCommandEncoderRelease(encoder);
+
 		wgpuDeviceRelease(device);
 		wgpuSurfaceRelease(surface);
 		wgpuAdapterRelease(adapter);
@@ -46,9 +53,8 @@ GLFWwindow* glfwInitialize()
 	return pWindow;
 }
 
-WGPUContext wgpuInitialize(GLFWwindow* pWindow)
+void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 {
-	WGPUContext ctx;
 	ctx.initialized = false;
 
 	// Setup WebGPU
@@ -69,7 +75,7 @@ WGPUContext wgpuInitialize(GLFWwindow* pWindow)
 	if (!ctx.instance)
 	{
 		std::cerr << "Could not initialize WebGPU" << std::endl;
-		return ctx;
+		return;
 	}
 	std::cout << "WebGPU initialized successfully: " << ctx.instance << std::endl;
 
@@ -78,7 +84,7 @@ WGPUContext wgpuInitialize(GLFWwindow* pWindow)
 	if (!ctx.surface)
 	{
 		std::cerr << "Could not get surface" << std::endl;
-		return ctx;
+		return;
 	}
 
 	// Retrieve the WebGPU adapter
@@ -90,7 +96,7 @@ WGPUContext wgpuInitialize(GLFWwindow* pWindow)
 	if (!ctx.adapter)
 	{
 		std::cerr << "Could not retrieve adapter" << std::endl;
-		return ctx;
+		return;
 	}
 	std::cout << "Got adapter: " << ctx.adapter << std::endl;
 	wgpuUtils::printAdapterFeatures(ctx.adapter);
@@ -103,13 +109,20 @@ WGPUContext wgpuInitialize(GLFWwindow* pWindow)
 	deviceDesc.requiredLimits = nullptr;
 	deviceDesc.defaultQueue.nextInChain = nullptr;
 	deviceDesc.defaultQueue.label = "Default Queue";
+	deviceDesc.deviceLostCallback = [](WGPUDeviceLostReason reason, char const * message, void* /*pUserdata*/){
+		std::cerr << "WGPU Device Lost: " << reason;
+		if (message)
+			std::cerr << " (" << message << ")";
+		std::cout << std::endl;
+	};
 
 	ctx.device = wgpuUtils::requestDevice(ctx.adapter, &deviceDesc);
 	if (!ctx.device)
 	{
 		std::cerr << "Could not retrieve device" << std::endl;
-		return ctx;
+		return;
 	}
+	std::cout << "Device retrieved" << std::endl;
 
 	auto onDeviceError = [](WGPUErrorType type, char const* message, void* /*pUserData*/)
 	{
@@ -120,8 +133,30 @@ WGPUContext wgpuInitialize(GLFWwindow* pWindow)
 	};
 	wgpuDeviceSetUncapturedErrorCallback(ctx.device, onDeviceError, nullptr);
 
+	// Get the queue on the device
+	ctx.queue = wgpuDeviceGetQueue(ctx.device);
+	auto onQueueWorkDone = [](WGPUQueueWorkDoneStatus status, void* /*pUserData*/)
+	{
+		std::cout << "Queued work completed with status: " << status << std::endl;
+	};
+#if defined(WEBGPU_BACKEND_DAWN)
+	wgpuQueueOnSubmittedWorkDone(ctx.queue, 0, onQueueWorkDone, nullptr);
+#else
+	wgpuQueueOnSubmittedWorkDone(ctx.queue, onQueueWorkDone, nullptr);
+#endif
+
+	WGPUCommandEncoderDescriptor encoderDesc{};
+	encoderDesc.nextInChain = nullptr;
+	encoderDesc.label = "My command encoder";
+	ctx.encoder = wgpuDeviceCreateCommandEncoder(ctx.device, &encoderDesc);
+
+	if (!ctx.encoder)
+	{
+		std::cerr << "Could not retrieve encoder" << std::endl;
+		return;
+	}
+	
 	ctx.initialized = true;
-	return ctx;
 }
 
 int main (int, char**)
@@ -134,13 +169,29 @@ int main (int, char**)
 	}
 	std::cout << "GLFW initialized successfully: " << pWindow << std::endl;
 
-	WGPUContext wgpuCtx = wgpuInitialize(pWindow);
+	WGPUContext wgpuCtx;
+	wgpuInitialize(pWindow, wgpuCtx);
+
 	if (!wgpuCtx.initialized)
 	{
 		std::cerr << "WebGPU not initialized correctly" << std::endl;
 		return 1;
 	}
 	std::cout << "WebGPU initialized successfully" << std::endl;
+
+	// Use encoder to generate commands
+	wgpuCommandEncoderInsertDebugMarker(wgpuCtx.encoder, "Do one thing");
+	wgpuCommandEncoderInsertDebugMarker(wgpuCtx.encoder, "Do another thing");
+
+	WGPUCommandBufferDescriptor cmdBufferDesc{};
+	cmdBufferDesc.nextInChain = nullptr;
+	cmdBufferDesc.label = "Command Buffer";
+	WGPUCommandBuffer command = wgpuCommandEncoderFinish(wgpuCtx.encoder, &cmdBufferDesc);
+
+	// Submit the command to the queue
+	std::cout << "Submitting command..." << std::endl;
+	wgpuQueueSubmit(wgpuCtx.queue, 1, &command);
+	wgpuCommandBufferRelease(command);
 
 	while (!glfwWindowShouldClose(pWindow))
 	{
