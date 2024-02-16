@@ -51,10 +51,6 @@ GLFWwindow* glfwInitialize()
 		return nullptr;
 	}
 
-	//TODO: On window resize create a new swap chain
-	// NOTE: resize callback is called in main thread so safe to release pointer
-	glfwSetWindowSizeCallback(pWindow, nullptr);
-
 	return pWindow;
 }
 
@@ -150,23 +146,7 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 	wgpuQueueOnSubmittedWorkDone(ctx.queue, onQueueWorkDone, nullptr);
 #endif
 
-	// Setup the swap chain
-	WGPUSwapChainDescriptor swapChainDesc{};
-	swapChainDesc.nextInChain = nullptr;
-	swapChainDesc.width = WINDOW_WIDTH;
-	swapChainDesc.height = WINDOW_HEIGHT;
-	swapChainDesc.usage = WGPUTextureUsage_RenderAttachment;
-	swapChainDesc.presentMode = WGPUPresentMode_Fifo;
-
-#if defined(WEBGPU_BACKEND_DAWN)
-	// Dawn does not yet support wgpuSurfaceGetPreferredFormat()
-	swapChainDesc.format = WGPUTextureFormat_BGRA8Unorm;
-#else
-	swapChainDesc.format = wgpuSurfaceGetPreferredFormat(ctx.surface, ctx.adapter);
-#endif
-
-	ctx.swapChain = wgpuDeviceCreateSwapChain(ctx.device, ctx.surface, &swapChainDesc);
-
+	ctx.swapChain = wgpuUtils::createSwapChain(ctx.device, ctx.surface, ctx.adapter, WINDOW_WIDTH, WINDOW_HEIGHT);
 	if (!ctx.swapChain)
 	{
 		std::cerr << "Could not create swap chain" << std::endl;
@@ -186,7 +166,7 @@ int main (int, char**)
 	}
 	std::cout << "GLFW initialized successfully: " << pWindow << std::endl;
 
-	WGPUContext wgpuCtx;
+	WGPUContext wgpuCtx{};
 	wgpuInitialize(pWindow, wgpuCtx);
 
 	if (!wgpuCtx.initialized)
@@ -195,6 +175,21 @@ int main (int, char**)
 		return 1;
 	}
 	std::cout << "WebGPU initialized successfully" << std::endl;
+
+	// On window resize create a new swap chain
+	glfwSetWindowUserPointer(pWindow, static_cast<void*>(&wgpuCtx));
+	glfwSetWindowSizeCallback(pWindow, [](GLFWwindow* pWindow, int width, int height){
+		WGPUContext* pWGPUCtx = static_cast<WGPUContext*>(glfwGetWindowUserPointer(pWindow));
+
+		if ( !(pWGPUCtx && pWGPUCtx->initialized) )
+			return;
+
+		// NOTE: resize callback is called in main thread so safe to release pointer
+		if (pWGPUCtx->swapChain)
+			wgpuSwapChainRelease(pWGPUCtx->swapChain);
+
+		pWGPUCtx->swapChain = wgpuUtils::createSwapChain(pWGPUCtx->device, pWGPUCtx->surface, pWGPUCtx->adapter, width, height);
+	});
 
 	while (!glfwWindowShouldClose(pWindow))
 	{

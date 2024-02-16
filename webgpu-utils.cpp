@@ -87,4 +87,25 @@ void printAdapterFeatures(WGPUAdapter adapter)
 	}
 }
 
+WGPUSwapChain createSwapChain(WGPUDevice device, WGPUSurface surface, WGPUAdapter adapter, int width, int height)
+{
+	WGPUSwapChainDescriptor swapChainDesc{};
+	swapChainDesc.nextInChain = nullptr;
+	swapChainDesc.width = width;
+	swapChainDesc.height = height;
+	swapChainDesc.usage = WGPUTextureUsage_RenderAttachment;
+	swapChainDesc.presentMode = WGPUPresentMode_Fifo;
+
+#if defined(WEBGPU_BACKEND_DAWN)
+	// Dawn does not yet support wgpuSurfaceGetPreferredFormat()
+	swapChainDesc.format = WGPUTextureFormat_BGRA8Unorm;
+	(void)adapter;
+#else
+	swapChainDesc.format = wgpuSurfaceGetPreferredFormat(surface, adapter);
+#endif
+
+	WGPUSwapChain swapChain = wgpuDeviceCreateSwapChain(device, surface, &swapChainDesc);
+	return swapChain;
+}
+
 } // namespace utils
