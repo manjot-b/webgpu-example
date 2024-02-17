@@ -1,4 +1,5 @@
 #include <iostream>
+#include <memory>
 #include <vector>
 
 #include <GLFW/glfw3.h>
@@ -6,31 +7,29 @@
 #include <glfw3webgpu.h>
 
 #include "webgpu-utils.hpp"
+#include "webgputypes.hpp"
 
 constexpr int WINDOW_WIDTH = 1280;
 constexpr int WINDOW_HEIGHT = 720;
 
 struct WGPUContext
 {
+	WGPUContext() :
+		instance(nullptr, wgpuInstanceRelease),
+		adapter(nullptr, wgpuAdapterRelease),
+		device(nullptr, wgpuDeviceRelease),
+		surface(nullptr, wgpuSurfaceRelease),
+		queue(nullptr, wgpuQueueRelease),
+		swapChain(nullptr, wgpuSwapChainRelease)
+	{}
 	bool initialized;
 
-	WGPUInstance instance;
-	WGPUAdapter adapter;
-	WGPUDevice device;
-	WGPUSurface surface;
-	WGPUQueue queue;
-	WGPUSwapChain swapChain;
-
-	~WGPUContext()
-	{
-		std::cout << "Releasing WebGPU context" << std::endl;
-
-		wgpuSwapChainRelease(swapChain);
-		wgpuDeviceRelease(device);
-		wgpuSurfaceRelease(surface);
-		wgpuAdapterRelease(adapter);
-		wgpuInstanceRelease(instance);
-	}
+	WGPUInstancePtr instance;
+	WGPUAdapterPtr adapter;
+	WGPUDevicePtr device;
+	WGPUSurfacePtr surface;
+	WGPUQueuePtr queue;
+	WGPUSwapChainPtr swapChain;
 };
 
 GLFWwindow* glfwInitialize()
@@ -71,17 +70,25 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 
 	WGPUInstanceDescriptor desc = {};
 	desc.nextInChain = nullptr;
-	ctx.instance = wgpuCreateInstance(&desc);
+	ctx.instance = WGPUInstancePtr
+	(
+		wgpuCreateInstance(&desc),
+		wgpuInstanceRelease
+	);
 
 	if (!ctx.instance)
 	{
 		std::cerr << "Could not initialize WebGPU" << std::endl;
 		return;
 	}
-	std::cout << "WebGPU initialized successfully: " << ctx.instance << std::endl;
+	std::cout << "WebGPU initialized successfully: " << ctx.instance.get() << std::endl;
 
 	// Retrieving the surface is platform dependant, so use a helper function
-	ctx.surface = glfwGetWGPUSurface(ctx.instance, pWindow);
+	ctx.surface = WGPUSurfacePtr
+	(
+		 glfwGetWGPUSurface(ctx.instance.get(), pWindow),
+		 wgpuSurfaceRelease
+	);
 	if (!ctx.surface)
 	{
 		std::cerr << "Could not get surface" << std::endl;
@@ -91,16 +98,20 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 	// Retrieve the WebGPU adapter
 	WGPURequestAdapterOptions adapterOptions{};
 	adapterOptions.nextInChain = nullptr;
-	adapterOptions.compatibleSurface = ctx.surface;
+	adapterOptions.compatibleSurface = ctx.surface.get();
 
-	ctx.adapter = wgpuUtils::requestAdapter(ctx.instance, &adapterOptions);
+	ctx.adapter = WGPUAdapterPtr
+	(
+		wgpuUtils::requestAdapter(ctx.instance.get(), &adapterOptions),
+		wgpuAdapterRelease
+	);
 	if (!ctx.adapter)
 	{
 		std::cerr << "Could not retrieve adapter" << std::endl;
 		return;
 	}
-	std::cout << "Got adapter: " << ctx.adapter << std::endl;
-	wgpuUtils::printAdapterFeatures(ctx.adapter);
+	std::cout << "Got adapter: " << ctx.adapter.get() << std::endl;
+	wgpuUtils::printAdapterFeatures(ctx.adapter.get());
 
 	// Use adapter and device description to retrieve a device
 	WGPUDeviceDescriptor deviceDesc;
@@ -117,7 +128,11 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 		std::cout << std::endl;
 	};
 
-	ctx.device = wgpuUtils::requestDevice(ctx.adapter, &deviceDesc);
+	ctx.device = WGPUDevicePtr
+	(
+		 wgpuUtils::requestDevice(ctx.adapter.get(), &deviceDesc),
+		 wgpuDeviceRelease
+	);
 	if (!ctx.device)
 	{
 		std::cerr << "Could not retrieve device" << std::endl;
@@ -132,27 +147,35 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 			std::cout << " (" << message << ")";
 		std::cout << std::endl;
 	};
-	wgpuDeviceSetUncapturedErrorCallback(ctx.device, onDeviceError, nullptr);
+	wgpuDeviceSetUncapturedErrorCallback(ctx.device.get(), onDeviceError, nullptr);
 
 	// Get the queue on the device
-	ctx.queue = wgpuDeviceGetQueue(ctx.device);
+	ctx.queue = WGPUQueuePtr
+	(
+		wgpuDeviceGetQueue(ctx.device.get()),
+		wgpuQueueRelease
+	);
 	auto onQueueWorkDone = [](WGPUQueueWorkDoneStatus status, void* /*pUserData*/)
 	{
 		std::cout << "Queued work completed with status: " << status << std::endl;
 	};
 #if defined(WEBGPU_BACKEND_DAWN)
-	wgpuQueueOnSubmittedWorkDone(ctx.queue, 0, onQueueWorkDone, nullptr);
+	wgpuQueueOnSubmittedWorkDone(ctx.queue.get(), 0, onQueueWorkDone, nullptr);
 #else
-	wgpuQueueOnSubmittedWorkDone(ctx.queue, onQueueWorkDone, nullptr);
+	wgpuQueueOnSubmittedWorkDone(ctx.queue.get(), onQueueWorkDone, nullptr);
 #endif
 
-	ctx.swapChain = wgpuUtils::createSwapChain(ctx.device, ctx.surface, ctx.adapter, WINDOW_WIDTH, WINDOW_HEIGHT);
+	ctx.swapChain = WGPUSwapChainPtr
+	(
+		wgpuUtils::createSwapChain(ctx.device.get(), ctx.surface.get(), ctx.adapter.get(), WINDOW_WIDTH, WINDOW_HEIGHT),
+		wgpuSwapChainRelease
+	);
 	if (!ctx.swapChain)
 	{
 		std::cerr << "Could not create swap chain" << std::endl;
 		return;
 	}
-	
+
 	ctx.initialized = true;
 }
 
@@ -166,7 +189,7 @@ int main (int, char**)
 	}
 	std::cout << "GLFW initialized successfully: " << pWindow << std::endl;
 
-	WGPUContext wgpuCtx{};
+	WGPUContext wgpuCtx;
 	wgpuInitialize(pWindow, wgpuCtx);
 
 	if (!wgpuCtx.initialized)
@@ -185,24 +208,25 @@ int main (int, char**)
 			return;
 
 		// NOTE: resize callback is called in main thread so safe to release pointer
-		if (pWGPUCtx->swapChain)
-			wgpuSwapChainRelease(pWGPUCtx->swapChain);
-
-		pWGPUCtx->swapChain = wgpuUtils::createSwapChain(pWGPUCtx->device, pWGPUCtx->surface, pWGPUCtx->adapter, width, height);
+		pWGPUCtx->swapChain = WGPUSwapChainPtr
+		(
+		 wgpuUtils::createSwapChain(pWGPUCtx->device.get(), pWGPUCtx->surface.get(), pWGPUCtx->adapter.get(), width, height),
+		 wgpuSwapChainRelease
+		);
 	});
 
 	while (!glfwWindowShouldClose(pWindow))
 	{
 		glfwPollEvents();
 
-		WGPUTextureView nextTexture = wgpuSwapChainGetCurrentTextureView(wgpuCtx.swapChain);
+		WGPUTextureView nextTexture = wgpuSwapChainGetCurrentTextureView(wgpuCtx.swapChain.get());
 		if (nextTexture) // swap chain becomes invalidated on a window resize
 		{
 			// First create the command encoder for this frame
 			WGPUCommandEncoderDescriptor encoderDesc{};
 			encoderDesc.nextInChain = nullptr;
 			encoderDesc.label = "My command encoder";
-			WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wgpuCtx.device, &encoderDesc);
+			WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wgpuCtx.device.get(), &encoderDesc);
 
 			// Next create the render pass encoder
 			WGPURenderPassColorAttachment renderPassColorAttachment{};
@@ -233,14 +257,14 @@ int main (int, char**)
 			WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDesc);
 
 			// Submit the command to the queue
-			wgpuQueueSubmit(wgpuCtx.queue, 1, &command);
+			wgpuQueueSubmit(wgpuCtx.queue.get(), 1, &command);
 
 			wgpuCommandEncoderRelease(encoder);
 			wgpuCommandBufferRelease(command);
 			wgpuRenderPassEncoderRelease(renderPass);
 			wgpuTextureViewRelease(nextTexture);
 
-			wgpuSwapChainPresent(wgpuCtx.swapChain);
+			wgpuSwapChainPresent(wgpuCtx.swapChain.get());
 		}
 
 	}
