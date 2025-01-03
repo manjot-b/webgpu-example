@@ -112,6 +112,7 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 	}
 	std::cout << "Got adapter: " << ctx.adapter.get() << std::endl;
 	wgpuUtils::printAdapterFeatures(ctx.adapter.get());
+	wgpuUtils::printAdapterProperties(ctx.adapter.get());
 
 	// Use adapter and device description to retrieve a device
 	WGPUDeviceDescriptor deviceDesc;

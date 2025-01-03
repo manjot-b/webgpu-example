@@ -1,5 +1,4 @@
 #include "webgpu-utils.hpp"
-#include "build/wgpu/_deps/webgpu-backend-wgpu-src/include/webgpu/webgpu.h"
 
 #include <cassert>
 #include <iostream>
@@ -81,10 +80,33 @@ void printAdapterFeatures(WGPUAdapter adapter)
 	wgpuAdapterEnumerateFeatures(adapter, features.data());
 
 	std::cout << "Adapter features:" << std::endl;
+	std::cout << std::hex;
 	for (auto f : features)
 	{
-		std::cout << "-" << f << std::endl;
+		std::cout << "0x" << f << std::endl;
 	}
+	std::cout << std::dec;
+}
+
+void printAdapterProperties(WGPUAdapter adapter)
+{
+	WGPUAdapterProperties properties = {};
+	wgpuAdapterGetProperties(adapter, &properties);
+
+	std::cout << "Adapter properties: " << std::endl;
+	std::cout << "vendorID: " << properties.vendorID << std::endl;
+	std::cout << "vendorName: " << properties.vendorName << std::endl;
+	std::cout << "architecture: " << properties.architecture << std::endl;
+	std::cout << "deviceID: " << properties.deviceID << std::endl;
+	std::cout << "name: " << properties.name << std::endl;
+	std::cout << "driverDescription: " << properties.driverDescription << std::endl;
+	std::cout << std::hex;
+	std::cout << "adapterType: 0x" << properties.adapterType << std::endl;
+	std::cout << "backendType: 0x" << properties.backendType << std::endl;
+	std::cout << std::dec;
+#if defined(WEBGPU_BACKEND_DAWN)
+	std::cout << "compatibilityMode: " << properties.compatibilityMode << std::endl;
+#endif
 }
 
 WGPUSwapChain createSwapChain(WGPUDevice device, WGPUSurface surface, WGPUAdapter adapter, int width, int height)
