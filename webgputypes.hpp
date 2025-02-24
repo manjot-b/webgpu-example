@@ -8,4 +8,3 @@ using WGPUAdapterPtr = std::unique_ptr<std::remove_pointer_t<WGPUAdapter>, declt
 using WGPUDevicePtr = std::unique_ptr<std::remove_pointer_t<WGPUDevice>, decltype(&wgpuDeviceRelease)>;
 using WGPUSurfacePtr = std::unique_ptr<std::remove_pointer_t<WGPUSurface>, decltype(&wgpuSurfaceRelease)>;
 using WGPUQueuePtr = std::unique_ptr<std::remove_pointer_t<WGPUQueue>, decltype(&wgpuQueueRelease)>;
-using WGPUSwapChainPtr = std::unique_ptr<std::remove_pointer_t<WGPUSwapChain>, decltype(&wgpuSwapChainRelease)>;

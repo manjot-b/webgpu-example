@@ -4,6 +4,9 @@
 
 #include <GLFW/glfw3.h>
 #include <webgpu/webgpu.h>
+#if defined(WEBGPU_BACKEND_WGPU)
+#include <webgpu/wgpu.h>
+#endif
 #include <glfw3webgpu.h>
 
 #include "webgpu-utils.hpp"
@@ -19,8 +22,7 @@ struct WGPUContext
 		adapter(nullptr, wgpuAdapterRelease),
 		device(nullptr, wgpuDeviceRelease),
 		surface(nullptr, wgpuSurfaceRelease),
-		queue(nullptr, wgpuQueueRelease),
-		swapChain(nullptr, wgpuSwapChainRelease)
+		queue(nullptr, wgpuQueueRelease)
 	{}
 	bool initialized;
 
@@ -29,7 +31,6 @@ struct WGPUContext
 	WGPUDevicePtr device;
 	WGPUSurfacePtr surface;
 	WGPUQueuePtr queue;
-	WGPUSwapChainPtr swapChain;
 };
 
 GLFWwindow* glfwInitialize()
@@ -86,8 +87,11 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 	// Retrieving the surface is platform dependant, so use a helper function
 	ctx.surface = WGPUSurfacePtr
 	(
-		 glfwGetWGPUSurface(ctx.instance.get(), pWindow),
-		 wgpuSurfaceRelease
+		glfwGetWGPUSurface(ctx.instance.get(), pWindow),
+		[](WGPUSurface surface){
+			wgpuSurfaceUnconfigure(surface);
+			wgpuSurfaceRelease(surface);
+		}
 	);
 	if (!ctx.surface)
 	{
@@ -118,7 +122,7 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 	WGPUDeviceDescriptor deviceDesc;
 	deviceDesc.nextInChain = nullptr;
 	deviceDesc.label = "My Device";
-	deviceDesc.requiredFeaturesCount = 0;
+	deviceDesc.requiredFeatureCount = 0;
 	deviceDesc.requiredLimits = nullptr;
 	deviceDesc.defaultQueue.nextInChain = nullptr;
 	deviceDesc.defaultQueue.label = "Default Queue";
@@ -160,24 +164,50 @@ void wgpuInitialize(GLFWwindow* pWindow, WGPUContext& ctx)
 	{
 		std::cout << "Queued work completed with status: " << status << std::endl;
 	};
-#if defined(WEBGPU_BACKEND_DAWN)
-	wgpuQueueOnSubmittedWorkDone(ctx.queue.get(), 0, onQueueWorkDone, nullptr);
-#else
 	wgpuQueueOnSubmittedWorkDone(ctx.queue.get(), onQueueWorkDone, nullptr);
-#endif
 
-	ctx.swapChain = WGPUSwapChainPtr
-	(
-		wgpuUtils::createSwapChain(ctx.device.get(), ctx.surface.get(), ctx.adapter.get(), WINDOW_WIDTH, WINDOW_HEIGHT),
-		wgpuSwapChainRelease
-	);
-	if (!ctx.swapChain)
-	{
-		std::cerr << "Could not create swap chain" << std::endl;
-		return;
-	}
+	wgpuUtils::configureSurface(ctx.surface.get(), ctx.device.get(), ctx.adapter.get(), WINDOW_WIDTH, WINDOW_HEIGHT);
+
+	// On window resize reconfigure the surface
+	glfwSetWindowUserPointer(pWindow, static_cast<void*>(&ctx));
+	glfwSetWindowSizeCallback(pWindow, [](GLFWwindow* pWindow, int width, int height){
+		WGPUContext* pWGPUCtx = static_cast<WGPUContext*>(glfwGetWindowUserPointer(pWindow));
+
+		if ( !(pWGPUCtx && pWGPUCtx->initialized) )
+			return;
+
+		wgpuSurfaceUnconfigure(pWGPUCtx->surface.get());
+		wgpuUtils::configureSurface(pWGPUCtx->surface.get(), pWGPUCtx->device.get(), pWGPUCtx->adapter.get(), width, height);
+	});
 
 	ctx.initialized = true;
+}
+
+WGPUTextureView GetNextSurfaceTextureView(WGPUSurface surface)
+{
+	WGPUSurfaceTexture surfaceTexture;
+	wgpuSurfaceGetCurrentTexture(surface, &surfaceTexture);
+
+	if (surfaceTexture.status != WGPUSurfaceGetCurrentTextureStatus_Success)
+		return nullptr;
+
+	WGPUTextureViewDescriptor viewDesc = {};
+	viewDesc.nextInChain = nullptr;
+	viewDesc.label = "Surface texture view";
+	viewDesc.format = wgpuTextureGetFormat(surfaceTexture.texture);
+	viewDesc.dimension = WGPUTextureViewDimension_2D;
+	viewDesc.baseMipLevel = 0;
+	viewDesc.mipLevelCount = 1;
+	viewDesc.baseArrayLayer = 0;
+	viewDesc.arrayLayerCount = 1;
+	viewDesc.aspect = WGPUTextureAspect_All;
+	WGPUTextureView textureView = wgpuTextureCreateView(surfaceTexture.texture, &viewDesc);
+
+#if !defined(WEBGPU_BACKEND_WGPU)
+	wgpuTextureRelease(surfaceTexture.texture);
+#endif
+
+	return textureView;
 }
 
 int main (int, char**)
@@ -200,74 +230,65 @@ int main (int, char**)
 	}
 	std::cout << "WebGPU initialized successfully" << std::endl;
 
-	// On window resize create a new swap chain
-	glfwSetWindowUserPointer(pWindow, static_cast<void*>(&wgpuCtx));
-	glfwSetWindowSizeCallback(pWindow, [](GLFWwindow* pWindow, int width, int height){
-		WGPUContext* pWGPUCtx = static_cast<WGPUContext*>(glfwGetWindowUserPointer(pWindow));
-
-		if ( !(pWGPUCtx && pWGPUCtx->initialized) )
-			return;
-
-		// NOTE: resize callback is called in main thread so safe to release pointer
-		pWGPUCtx->swapChain = WGPUSwapChainPtr
-		(
-		 wgpuUtils::createSwapChain(pWGPUCtx->device.get(), pWGPUCtx->surface.get(), pWGPUCtx->adapter.get(), width, height),
-		 wgpuSwapChainRelease
-		);
-	});
-
 	while (!glfwWindowShouldClose(pWindow))
 	{
 		glfwPollEvents();
 
-		WGPUTextureView nextTexture = wgpuSwapChainGetCurrentTextureView(wgpuCtx.swapChain.get());
-		if (nextTexture) // swap chain becomes invalidated on a window resize
-		{
-			// First create the command encoder for this frame
-			WGPUCommandEncoderDescriptor encoderDesc{};
-			encoderDesc.nextInChain = nullptr;
-			encoderDesc.label = "My command encoder";
-			WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wgpuCtx.device.get(), &encoderDesc);
+		WGPUTextureView nextTexture = GetNextSurfaceTextureView(wgpuCtx.surface.get());
+		if (nextTexture == nullptr) // swap chain becomes invalidated on a window resize
+			continue;
 
-			// Next create the render pass encoder
-			WGPURenderPassColorAttachment renderPassColorAttachment{};
-			renderPassColorAttachment.view = nextTexture;
-			renderPassColorAttachment.resolveTarget = nullptr;
-			renderPassColorAttachment.loadOp = WGPULoadOp_Clear;
-			renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
-			renderPassColorAttachment.clearValue = WGPUColor{ 0.8, 0.25, 0.4, 1.0 };
+		// First create the command encoder for this frame
+		WGPUCommandEncoderDescriptor encoderDesc{};
+		encoderDesc.nextInChain = nullptr;
+		encoderDesc.label = "My command encoder";
+		WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(wgpuCtx.device.get(), &encoderDesc);
 
-			WGPURenderPassDescriptor renderPassDesc{};
-			renderPassDesc.colorAttachmentCount = 1;
-			renderPassDesc.colorAttachments = &renderPassColorAttachment;
-			renderPassDesc.nextInChain = nullptr;
-			renderPassDesc.depthStencilAttachment = nullptr;
+		// Next create the render pass encoder
+		WGPURenderPassColorAttachment renderPassColorAttachment{};
+		renderPassColorAttachment.view = nextTexture;
+		renderPassColorAttachment.resolveTarget = nullptr;
+		renderPassColorAttachment.loadOp = WGPULoadOp_Clear;
+		renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
+		renderPassColorAttachment.clearValue = WGPUColor{ 0.8, 0.25, 0.4, 1.0 };
+#if !defined(WEBGPU_BACKEND_WGPU)
+		renderPassColorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
+#endif
 
-			// useful for debugging
-			renderPassDesc.timestampWriteCount = 0;
-			renderPassDesc.timestampWrites = nullptr;
+		WGPURenderPassDescriptor renderPassDesc{};
+		renderPassDesc.colorAttachmentCount = 1;
+		renderPassDesc.colorAttachments = &renderPassColorAttachment;
+		renderPassDesc.nextInChain = nullptr;
+		renderPassDesc.depthStencilAttachment = nullptr;
 
-			// Ending render pass right away causes clear color to be set
-			WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
-			wgpuRenderPassEncoderEnd(renderPass);
+		// useful for debugging
+		renderPassDesc.timestampWrites = nullptr;
 
-			// create the command
-			WGPUCommandBufferDescriptor cmdBufferDesc{};
-			cmdBufferDesc.nextInChain = nullptr;
-			cmdBufferDesc.label = "Command Buffer";
-			WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDesc);
+		// Ending render pass right away causes clear color to be set
+		WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
+		wgpuRenderPassEncoderEnd(renderPass);
 
-			// Submit the command to the queue
-			wgpuQueueSubmit(wgpuCtx.queue.get(), 1, &command);
+		// create the command
+		WGPUCommandBufferDescriptor cmdBufferDesc{};
+		cmdBufferDesc.nextInChain = nullptr;
+		cmdBufferDesc.label = "Command Buffer";
+		WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDesc);
 
-			wgpuCommandEncoderRelease(encoder);
-			wgpuCommandBufferRelease(command);
-			wgpuRenderPassEncoderRelease(renderPass);
-			wgpuTextureViewRelease(nextTexture);
+		// Submit the command to the queue
+		wgpuQueueSubmit(wgpuCtx.queue.get(), 1, &command);
 
-			wgpuSwapChainPresent(wgpuCtx.swapChain.get());
-		}
+		wgpuCommandEncoderRelease(encoder);
+		wgpuCommandBufferRelease(command);
+		wgpuRenderPassEncoderRelease(renderPass);
+		wgpuTextureViewRelease(nextTexture);
 
+		wgpuSurfacePresent(wgpuCtx.surface.get());
+
+#if defined(WEBGPU_BACKEND_DAWN)
+		wgpuDeviceTick(wgpuCtx.device.get());
+#elif defined(WEBGPU_BACKEND_WGPU)
+		wgpuDevicePoll(wgpuCtx.device.get(), false, nullptr);
+#endif
 	}
 
 	// cleanup

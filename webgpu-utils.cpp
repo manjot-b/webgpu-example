@@ -109,25 +109,22 @@ void printAdapterProperties(WGPUAdapter adapter)
 #endif
 }
 
-WGPUSwapChain createSwapChain(WGPUDevice device, WGPUSurface surface, WGPUAdapter adapter, int width, int height)
+void configureSurface(WGPUSurface surface, WGPUDevice device, WGPUAdapter adapter, int width, int height)
 {
-	WGPUSwapChainDescriptor swapChainDesc{};
-	swapChainDesc.nextInChain = nullptr;
-	swapChainDesc.width = width;
-	swapChainDesc.height = height;
-	swapChainDesc.usage = WGPUTextureUsage_RenderAttachment;
-	swapChainDesc.presentMode = WGPUPresentMode_Fifo;
+	WGPUTextureFormat surfaceFormat = wgpuSurfaceGetPreferredFormat(surface, adapter);
 
-#if defined(WEBGPU_BACKEND_DAWN)
-	// Dawn does not yet support wgpuSurfaceGetPreferredFormat()
-	swapChainDesc.format = WGPUTextureFormat_BGRA8Unorm;
-	(void)adapter;
-#else
-	swapChainDesc.format = wgpuSurfaceGetPreferredFormat(surface, adapter);
-#endif
+	WGPUSurfaceConfiguration surfaceConfig = {};
+	surfaceConfig.width = width;
+	surfaceConfig.height = height;
+	surfaceConfig.format = surfaceFormat;
+	surfaceConfig.viewFormatCount = 0;
+	surfaceConfig.viewFormats = nullptr;
+	surfaceConfig.usage = WGPUTextureUsage_RenderAttachment;
+	surfaceConfig.device = device;
+	surfaceConfig.presentMode = WGPUPresentMode_Fifo;
+	surfaceConfig.alphaMode = WGPUCompositeAlphaMode_Auto;
 
-	WGPUSwapChain swapChain = wgpuDeviceCreateSwapChain(device, surface, &swapChainDesc);
-	return swapChain;
+	wgpuSurfaceConfigure(surface, &surfaceConfig);
 }
 
 } // namespace utils
