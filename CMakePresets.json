@@ -1,0 +1,99 @@
+{
+	"version": 3,
+	"cmakeMinimumRequired": {
+		"major": 3,
+		"minor": 21,
+		"patch": 0
+	},
+	"configurePresets": [
+		{
+			"name": "ninja",
+			"hidden": true,
+			"generator": "Ninja"
+		},
+		{
+			"name": "debug",
+			"hidden": true,
+			"environment": {
+				"BUILD_TYPE": "debug"
+			},
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "DEBUG"
+			}
+		},
+		{
+			"name": "release",
+			"hidden": true,
+			"environment": {
+				"BUILD_TYPE": "release"
+			},
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "RELEASE"
+			}
+		},
+		{
+			"name": "dawn",
+			"hidden": true,
+			"environment": {
+				"WEBGPU_BACKEND": "dawn"
+			},
+			"cacheVariables": {
+				"WEBGPU_BACKEND": "DAWN"
+			}
+		},
+		{
+			"name": "wgpu",
+			"hidden": true,
+			"environment": {
+				"WEBGPU_BACKEND": "wgpu"
+			},
+			"cacheVariables": {
+				"WEBGPU_BACKEND": "WGPU"
+			}
+		},
+		{
+			"name": "default",
+			"hidden": true,
+			"binaryDir": "${sourceDir}/build/$env{WEBGPU_BACKEND}-$env{BUILD_TYPE}",
+			"cacheVariables": {
+				"CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+			}
+		},
+		{
+			"name": "dawn-debug",
+			"inherits": [
+				"default",
+				"ninja",
+				"dawn",
+				"debug"
+			]
+		},
+		{
+			"name": "wgpu-debug",
+			"inherits": [
+				"default",
+				"ninja",
+				"wgpu",
+				"debug"
+			]
+		},
+		{
+			"name": "dawn-release",
+			"inherits": [
+				"default",
+				"ninja",
+				"dawn",
+				"release"
+			]
+		},
+		{
+			"name": "wgpu-release",
+			"inherits": [
+				"default",
+				"ninja",
+				"wgpu",
+				"release"
+			]
+		}
+	]
+}
