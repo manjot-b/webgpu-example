@@ -5,6 +5,8 @@ project(LearnWebGPU
 
 add_executable(app
 	main.cpp
+	App.cpp
+	App.hpp
 	webgpu-utils.cpp
 	webgpu-utils.hpp
 )
