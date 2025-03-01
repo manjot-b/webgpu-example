@@ -12,8 +12,8 @@ public:
 	~App();
 	void Tick();
 	void Terminate();
-	bool Initialized();
-	bool IsRunning();
+	bool IsInitialized() const;
+	bool IsRunning() const;
 private:
 	struct WgpuContext
 	{

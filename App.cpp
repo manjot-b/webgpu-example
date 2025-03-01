@@ -33,7 +33,7 @@ void App::Terminate()
 	m_terminated = true;
 }
 
-bool App::Initialized() { return m_initialized; }
+bool App::IsInitialized() const { return m_initialized; }
 
 bool App::Initialize()
 {
@@ -103,11 +103,18 @@ App::WgpuContext App::WgpuInitialize()
 	#error "No valid WebGPU backend detected"
 #endif
 
+#if !defined(WEBGPU_BACKEND_EMSCRIPTEN)
 	WGPUInstanceDescriptor desc = {};
 	desc.nextInChain = nullptr;
+#endif
+
 	ctx.instance = WgpuInstancePtr
 	(
+#if defined(WEBGPU_BACKEND_EMSCRIPTEN)
+		wgpuCreateInstance(nullptr),
+#else
 		wgpuCreateInstance(&desc),
+#endif
 		wgpuInstanceRelease
 	);
 
@@ -271,7 +278,9 @@ void App::Tick()
 	wgpuRenderPassEncoderRelease(renderPass);
 	wgpuTextureViewRelease(nextTexture);
 
+#if !defined(WEBGPU_BACKEND_EMSCRIPTEN)
 	wgpuSurfacePresent(m_wgpuCtx.surface.get());
+#endif
 
 #if defined(WEBGPU_BACKEND_DAWN)
 	wgpuDeviceTick(m_wgpuCtx.device.get());
@@ -309,4 +318,4 @@ WGPUTextureView App::GetNextSurfaceTextureView(WGPUSurface surface)
 	return textureView;
 }
 
-bool App::IsRunning() { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow); }
+bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow); }

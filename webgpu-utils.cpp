@@ -1,5 +1,9 @@
 #include "webgpu-utils.hpp"
 
+#if defined(WEBGPU_BACKEND_EMSCRIPTEN)
+#include <emscripten.h>
+#endif
+
 #include <cassert>
 #include <iostream>
 #include <vector>
@@ -32,6 +36,11 @@ WGPUAdapter requestAdapter(WGPUInstance instance, const WGPURequestAdapterOption
 	};
 
 	wgpuInstanceRequestAdapter(instance, options, onAdapterRequestEnded, static_cast<void*>(&userData));
+
+#if defined(WEBGPU_BACKEND_EMSCRIPTEN)
+	while (!userData.requestEnded)
+		emscripten_sleep(100);
+#endif
 
 	// The callback is called synchronously so the following assert should never fire.
 	assert(userData.requestEnded);
@@ -66,6 +75,11 @@ WGPUDevice requestDevice(WGPUAdapter adapter, const WGPUDeviceDescriptor* descri
 
 	wgpuAdapterRequestDevice(adapter, descriptor, onDeviceRequestEnded, static_cast<void*>(&userData));
 
+#if defined(WEBGPU_BACKEND_EMSCRIPTEN)
+	while (!userData.requestEnded)
+		emscripten_sleep(100);
+#endif
+
 	// The callback is called synchronously so the following assert should never fire.
 	assert(userData.requestEnded);
 
@@ -90,6 +104,7 @@ void printAdapterFeatures(WGPUAdapter adapter)
 
 void printAdapterProperties(WGPUAdapter adapter)
 {
+#if defined(WEBGPU_BACKEND_WGPU)
 	WGPUAdapterProperties properties = {};
 	wgpuAdapterGetProperties(adapter, &properties);
 
@@ -104,8 +119,19 @@ void printAdapterProperties(WGPUAdapter adapter)
 	std::cout << "adapterType: 0x" << properties.adapterType << std::endl;
 	std::cout << "backendType: 0x" << properties.backendType << std::endl;
 	std::cout << std::dec;
-#if defined(WEBGPU_BACKEND_DAWN)
-	std::cout << "compatibilityMode: " << properties.compatibilityMode << std::endl;
+#else
+	WGPUAdapterInfo info = {};
+	wgpuAdapterGetInfo(adapter, &info);
+
+	std::cout << "Adapter info: " << std::endl;
+	std::cout << "vendorID: " << info.vendorID << std::endl;
+	std::cout << "architecture: " << info.architecture << std::endl;
+	std::cout << "device: " << info.device << std::endl;
+	std::cout << "description: " << info.description << std::endl;
+	std::cout << std::hex;
+	std::cout << "adapterType: 0x" << info.adapterType << std::endl;
+	std::cout << "backendType: 0x" << info.backendType << std::endl;
+	std::cout << std::dec;
 #endif
 }
 

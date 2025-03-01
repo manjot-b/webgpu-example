@@ -52,6 +52,16 @@
 			}
 		},
 		{
+			"name": "wasm",
+			"hidden": true,
+			"environment": {
+				"WEBGPU_BACKEND": "wasm"
+			},
+			"cacheVariables": {
+				"WEBGPU_BACKEND": "EMSCRIPTEN"
+			}
+		},
+		{
 			"name": "default",
 			"hidden": true,
 			"binaryDir": "${sourceDir}/build/$env{WEBGPU_BACKEND}-$env{BUILD_TYPE}",
@@ -78,6 +88,15 @@
 			]
 		},
 		{
+			"name": "wasm-debug",
+			"inherits": [
+				"default",
+				"ninja",
+				"wasm",
+				"debug"
+			]
+		},
+		{
 			"name": "dawn-release",
 			"inherits": [
 				"default",
@@ -92,6 +111,15 @@
 				"default",
 				"ninja",
 				"wgpu",
+				"release"
+			]
+		},
+		{
+			"name": "wasm-release",
+			"inherits": [
+				"default",
+				"ninja",
+				"wasm",
 				"release"
 			]
 		}
