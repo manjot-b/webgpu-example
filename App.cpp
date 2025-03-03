@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 #include <iostream>
+#include <sstream>
 
 #include "webgpu-utils.hpp"
 
@@ -33,10 +34,38 @@ void App::Terminate()
 	m_terminated = true;
 }
 
+void App::AddDeviceError(WGPUErrorType error, const char* message)
+{
+	std::stringstream ss;
+	ss << "Uncaptured device error: type " << error;
+	if (message)
+		ss << " (" << message << ")";
+	ss << std::endl;
+
+	m_wgpuErrors.push( {error, ss.str()} );
+}
+
+bool App::LogDeviceErrors()
+{
+	if (m_wgpuErrors.empty())
+		return false;
+
+	while (!m_wgpuErrors.empty())
+	{
+		std::cerr << m_wgpuErrors.front().message << std::endl;
+		m_wgpuErrors.pop();
+	}
+
+	return true;
+}
+
+bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow.get()); }
+
 bool App::IsInitialized() const { return m_initialized; }
 
 bool App::Initialize()
 {
+	// Init Glfw
 	m_pWindow = GlfwWindowPtr(GlfwInitialize(), glfwDestroyWindow);
 	if (m_pWindow == nullptr)
 	{
@@ -44,6 +73,7 @@ bool App::Initialize()
 		return false;
 	}
 
+	// Init Wgpu
 	m_wgpuCtx = WgpuInitialize();
 	if (m_wgpuCtx.initialized == false)
 	{
@@ -62,6 +92,21 @@ bool App::Initialize()
 		wgpuSurfaceUnconfigure(pWgpuCtx->surface.get());
 		wgpuUtils::configureSurface(pWgpuCtx->surface.get(), pWgpuCtx->device.get(), pWgpuCtx->adapter.get(), width, height);
 	});
+
+	// Init Wgpu Pipeline
+	m_wgpuCtx.pipeline = WgpuRenderPipelinePtr(WgpuRenderPipelineInitialize(), wgpuRenderPipelineRelease);
+	if (!m_wgpuCtx.pipeline)
+	{
+		std::cerr << "Could not initialize WebGPU pipeline. Aborting initialization." << std::endl;
+		return false;
+	}
+
+	// On Emscripten the errors might not be captured yet because the callback is asynchronous.
+	if (LogDeviceErrors())
+	{
+		std::cerr << "Device errors encountered during initialization. Aborting initialization" << std::endl;
+		return false;
+	}
 
 	return true;
 }
@@ -186,14 +231,13 @@ App::WgpuContext App::WgpuInitialize()
 	}
 	std::cout << "Device retrieved" << std::endl;
 
-	auto onDeviceError = [](WGPUErrorType type, char const* message, void* /*pUserData*/)
+	auto onDeviceError = [](WGPUErrorType type, char const* message, void* pUserData)
 	{
-		std::cout << "Uncaptured device error: type " << type;
-		if (message)
-			std::cout << " (" << message << ")";
-		std::cout << std::endl;
+		App* app = static_cast<App*>(pUserData);
+		if (app)
+			app->AddDeviceError(type, message);
 	};
-	wgpuDeviceSetUncapturedErrorCallback(ctx.device.get(), onDeviceError, nullptr);
+	wgpuDeviceSetUncapturedErrorCallback(ctx.device.get(), onDeviceError, this);
 
 	// Get the queue on the device
 	ctx.queue = WgpuQueuePtr
@@ -211,6 +255,106 @@ App::WgpuContext App::WgpuInitialize()
 
 	ctx.initialized = true;
 	return ctx;
+}
+
+WGPURenderPipeline App::WgpuRenderPipelineInitialize()
+{
+	WGPURenderPipelineDescriptor pipelineDesc = {};
+	pipelineDesc.nextInChain = nullptr;
+
+	// Shader module
+	WGPUShaderModuleWGSLDescriptor shaderCodeDesc{};
+	shaderCodeDesc.chain.next = nullptr;
+	shaderCodeDesc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
+	shaderCodeDesc.code = GetShaderSource();
+
+	WGPUShaderModuleDescriptor shaderDesc{};
+	shaderDesc.nextInChain = &shaderCodeDesc.chain;
+	WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(m_wgpuCtx.device.get(), &shaderDesc);
+
+	// Vertex state
+	pipelineDesc.vertex.bufferCount = 0;
+	pipelineDesc.vertex.buffers = nullptr;
+	pipelineDesc.vertex.module = shaderModule;
+	pipelineDesc.vertex.entryPoint = "vs_main";
+	pipelineDesc.vertex.constantCount = 0;
+	pipelineDesc.vertex.constants = nullptr;
+
+	// Primitive state
+	pipelineDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
+	pipelineDesc.primitive.stripIndexFormat = WGPUIndexFormat_Undefined;
+	pipelineDesc.primitive.frontFace = WGPUFrontFace_CCW;
+	pipelineDesc.primitive.cullMode = WGPUCullMode_Back;
+
+	// Fragment state
+	WGPUFragmentState fragment{};
+	fragment.module = shaderModule;
+	fragment.entryPoint = "fs_main";
+	fragment.constantCount = 0;
+	fragment.constants = nullptr;
+
+	// Depth/Stencil state
+	pipelineDesc.depthStencil = nullptr;
+
+	// Blend State
+	WGPUBlendState blend{};
+	blend.color.srcFactor = WGPUBlendFactor_SrcAlpha;
+	blend.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+	blend.color.operation = WGPUBlendOperation_Add;
+	blend.alpha.srcFactor = WGPUBlendFactor_Zero;  // Alpha is already incorporated into the RGB color
+	blend.alpha.dstFactor = WGPUBlendFactor_One;
+	blend.alpha.operation = WGPUBlendOperation_Add;
+
+	WGPUColorTargetState colorTarget{};
+	colorTarget.format = wgpuSurfaceGetPreferredFormat(m_wgpuCtx.surface.get(), m_wgpuCtx.adapter.get());
+	colorTarget.blend = &blend;
+	colorTarget.writeMask = WGPUColorWriteMask_All;
+
+	// Set target for fragment output
+	fragment.targetCount = 1;
+	fragment.targets = &colorTarget;
+	pipelineDesc.fragment = &fragment;
+
+	// Multisampling state
+	pipelineDesc.multisample.count = 1;
+	pipelineDesc.multisample.mask = ~0u;  // Enable all bits
+	pipelineDesc.multisample.alphaToCoverageEnabled = false;
+
+	pipelineDesc.layout = nullptr;
+
+	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(m_wgpuCtx.device.get(), &pipelineDesc);
+	wgpuShaderModuleRelease(shaderModule);
+
+	return pipeline;
+}
+
+const char* App::GetShaderSource()
+{
+	static const char* shaderSource = R"(
+@vertex
+fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f
+{
+	var p = vec2f(.0, .0);
+	if (in_vertex_index == 0u) {
+		p = vec2f(-.5, -.5);
+	}
+	else if (in_vertex_index == 1u) {
+		p = vec2f(.5, -.5);
+	}
+	else {
+		p = vec2f(.0, .5);
+	}
+
+	return vec4f(p, .0, 1.);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4f
+{
+	return vec4f(.0, .6, .9, 1.);
+})";
+
+	return shaderSource;
 }
 
 void App::Tick()
@@ -259,8 +403,10 @@ void App::Tick()
 	// useful for debugging
 	renderPassDesc.timestampWrites = nullptr;
 
-	// Ending render pass right away causes clear color to be set
+	// Use render pipeline created during initialization to make a draw call
 	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
+	wgpuRenderPassEncoderSetPipeline(renderPass, m_wgpuCtx.pipeline.get());
+	wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
 	wgpuRenderPassEncoderEnd(renderPass);
 
 	// create the command
@@ -289,6 +435,7 @@ void App::Tick()
 #endif
 
 	++tick;
+	LogDeviceErrors();
 }
 
 WGPUTextureView App::GetNextSurfaceTextureView(WGPUSurface surface)
@@ -317,5 +464,3 @@ WGPUTextureView App::GetNextSurfaceTextureView(WGPUSurface surface)
 
 	return textureView;
 }
-
-bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow.get()); }

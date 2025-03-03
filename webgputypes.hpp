@@ -8,3 +8,4 @@ using WgpuAdapterPtr = std::unique_ptr<std::remove_pointer_t<WGPUAdapter>, declt
 using WgpuDevicePtr = std::unique_ptr<std::remove_pointer_t<WGPUDevice>, decltype(&wgpuDeviceRelease)>;
 using WgpuSurfacePtr = std::unique_ptr<std::remove_pointer_t<WGPUSurface>, decltype(&wgpuSurfaceRelease)>;
 using WgpuQueuePtr = std::unique_ptr<std::remove_pointer_t<WGPUQueue>, decltype(&wgpuQueueRelease)>;
+using WgpuRenderPipelinePtr = std::unique_ptr<std::remove_pointer_t<WGPURenderPipeline>, decltype(&wgpuRenderPipelineRelease)>;
