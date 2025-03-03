@@ -42,5 +42,7 @@ private:
 	bool m_initialized;
 	bool m_terminated;
 	WgpuContext m_wgpuCtx;
-	GLFWwindow* m_pWindow;
+
+	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
+	GlfwWindowPtr m_pWindow;
 };

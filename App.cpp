@@ -3,6 +3,7 @@
 #if defined(WEBGPU_BACKEND_WGPU)
 #include <webgpu/wgpu.h>
 #endif
+#include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 #include <iostream>
 
@@ -13,7 +14,7 @@ constexpr int WINDOW_WIDTH = 1280;
 constexpr int WINDOW_HEIGHT = 720;
 }
 
-App::App() : m_terminated(false), m_pWindow(nullptr)
+App::App() : m_terminated(false), m_pWindow(nullptr, glfwDestroyWindow)
 {
 	m_initialized = Initialize();
 }
@@ -26,8 +27,7 @@ App::~App()
 
 void App::Terminate()
 {
-	glfwDestroyWindow(m_pWindow);
-	m_pWindow = nullptr;
+	m_pWindow.reset();
 	glfwTerminate();
 	m_initialized = false;
 	m_terminated = true;
@@ -37,7 +37,7 @@ bool App::IsInitialized() const { return m_initialized; }
 
 bool App::Initialize()
 {
-	m_pWindow = GlfwInitialize();
+	m_pWindow = GlfwWindowPtr(GlfwInitialize(), glfwDestroyWindow);
 	if (m_pWindow == nullptr)
 	{
 		std::cerr << "Could not initialize glfw. Aborting initialization." << std::endl;
@@ -52,8 +52,8 @@ bool App::Initialize()
 	}
 
 	// On window resize reconfigure the surface
-	glfwSetWindowUserPointer(m_pWindow, static_cast<void*>(&m_wgpuCtx));
-	glfwSetWindowSizeCallback(m_pWindow, [](GLFWwindow* pWindow, int width, int height){
+	glfwSetWindowUserPointer(m_pWindow.get(), static_cast<void*>(&m_wgpuCtx));
+	glfwSetWindowSizeCallback(m_pWindow.get(), [](GLFWwindow* pWindow, int width, int height){
 		WgpuContext* pWgpuCtx = static_cast<WgpuContext*>(glfwGetWindowUserPointer(pWindow));
 
 		if ( !(pWgpuCtx && pWgpuCtx->initialized) )
@@ -128,7 +128,7 @@ App::WgpuContext App::WgpuInitialize()
 	// Retrieving the surface is platform dependant, so use a helper function
 	ctx.surface = WgpuSurfacePtr
 	(
-		glfwGetWGPUSurface(ctx.instance.get(), m_pWindow),
+		glfwGetWGPUSurface(ctx.instance.get(), m_pWindow.get()),
 		[](WGPUSurface surface){
 			wgpuSurfaceUnconfigure(surface);
 			wgpuSurfaceRelease(surface);
@@ -318,4 +318,4 @@ WGPUTextureView App::GetNextSurfaceTextureView(WGPUSurface surface)
 	return textureView;
 }
 
-bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow); }
+bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow.get()); }
