@@ -245,6 +245,9 @@ App::WgpuContext App::WgpuInitialize()
 		wgpuDeviceGetQueue(ctx.device.get()),
 		wgpuQueueRelease
 	);
+
+	// Callback only invoked when all work submitted up to this point in complete.
+	// No work has been submitted to the queue yet...
 	auto onQueueWorkDone = [](WGPUQueueWorkDoneStatus status, void* /*pUserData*/)
 	{
 		std::cout << "Queued work completed with status: " << status << std::endl;
