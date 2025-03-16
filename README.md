@@ -1,5 +1,5 @@
 # Build
-## Emscripten
+## Emscripten (Web Browser)
 - Install the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) somewhere on
 your system
 - Set the environment variables by running `source /path/to/emsdk_env.sh`
@@ -15,3 +15,7 @@ emcmake cmake --preset wasm-<release|debug>
 - For Firefox you will need to install Firefox Nightly at the moment
     - Check [current support](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#browser_compatibility) for WebGPU
     - Go to about:config and make sure `dom.webgpu.enabled` is enabled
+
+## Native
+### Pre-Requisites
+- Install `cargo` to build WGPU

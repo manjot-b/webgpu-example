@@ -5,6 +5,7 @@
 
 #include <queue>
 #include <string>
+#include <tuple>
 
 class GLFWwindow;
 
@@ -45,14 +46,20 @@ private:
 		std::string message;
 	};
 
-	void AddDeviceError(WGPUErrorType error, const char* message);
+	struct WindowDimensions
+	{
+		int width;
+		int height;
+	};
+
+	void AddDeviceError(WGPUErrorType error, std::string_view message);
 	bool LogDeviceErrors();
 	bool Initialize();
 	GLFWwindow* GlfwInitialize();
 	WgpuContext WgpuInitialize();
 	WGPURenderPipeline WgpuRenderPipelineInitialize();
 	const char* GetShaderSource();
-	WGPUTextureView GetNextSurfaceTextureView(WGPUSurface surface);
+	std::tuple<WGPUTextureView, WGPUTexture> GetNextSurfaceTextureView();
 
 	bool m_initialized;
 	bool m_terminated;
@@ -61,4 +68,5 @@ private:
 
 	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
 	GlfwWindowPtr m_pWindow;
+	WindowDimensions m_windowDim;
 };
