@@ -12,7 +12,7 @@
 #include "webgpu-utils.hpp"
 
 
-App::App() : m_terminated(false), m_pWindow(nullptr, glfwDestroyWindow), m_windowDim{1280, 720}
+App::App() : m_terminated(false), m_pWindow(nullptr, [](GLFWwindow*){}), m_windowDim{1280, 720}
 {
 	m_initialized = Initialize();
 }
@@ -250,8 +250,8 @@ App::WgpuContext App::WgpuInitialize()
 
 	ctx.device = WgpuDevicePtr
 	(
-		 wgpuUtils::requestDevice(ctx.instance.get(), ctx.adapter.get(), &deviceDesc),
-		 wgpuDeviceRelease
+		wgpuUtils::requestDevice(ctx.instance.get(), ctx.adapter.get(), &deviceDesc),
+		wgpuDeviceRelease
 	);
 	if (!ctx.device)
 	{
@@ -322,12 +322,15 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 
 	WGPUShaderModuleDescriptor shaderDesc{};
 	shaderDesc.nextInChain = &shaderSourceDesc.chain;
-	WGPUShaderModule shaderModule = wgpuDeviceCreateShaderModule(m_wgpuCtx.device.get(), &shaderDesc);
+	WgpuShaderModulePtr shaderModule(
+			wgpuDeviceCreateShaderModule(m_wgpuCtx.device.get(), &shaderDesc),
+			wgpuShaderModuleRelease
+	);
 
 	// Vertex state
 	pipelineDesc.vertex.bufferCount = 0;
 	pipelineDesc.vertex.buffers = nullptr;
-	pipelineDesc.vertex.module = shaderModule;
+	pipelineDesc.vertex.module = shaderModule.get();
 #if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	pipelineDesc.vertex.entryPoint = WGPUStringView{"vs_main", WGPU_STRLEN};
 #else
@@ -344,7 +347,7 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 
 	// Fragment state
 	WGPUFragmentState fragment{};
-	fragment.module = shaderModule;
+	fragment.module = shaderModule.get();
 #if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	fragment.entryPoint = WGPUStringView{"fs_main", WGPU_STRLEN};
 #else
@@ -387,7 +390,6 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 	pipelineDesc.layout = nullptr;
 
 	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(m_wgpuCtx.device.get(), &pipelineDesc);
-	wgpuShaderModuleRelease(shaderModule);
 
 	return pipeline;
 }
@@ -425,11 +427,17 @@ void App::Tick()
 {
 	glfwPollEvents();
 
-	auto [nextTextureView, texture] = GetNextSurfaceTextureView();
-	if (nextTextureView == nullptr) // swap chain becomes invalidated on a window resize
+	WgpuTexturePtr nextTexture( nullptr, [](WGPUTexture){} );
+	WgpuTextureViewPtr nextTextureView( nullptr, [](WGPUTextureView){} );
 	{
-		std::cerr << "Skipping render frame" << std::endl;
-		return;
+		auto [textureView, texture] = GetNextSurfaceTextureView();
+		if (textureView == nullptr) // swap chain becomes invalidated on a window resize
+		{
+			std::cerr << "Skipping render frame" << std::endl;
+			return;
+		}
+		nextTexture = WgpuTexturePtr(texture, wgpuTextureRelease);
+		nextTextureView = WgpuTextureViewPtr(textureView, wgpuTextureViewRelease);
 	}
 
 	// First create the command encoder for this frame
@@ -440,7 +448,10 @@ void App::Tick()
 #else
 	encoderDesc.label = "My command encoder";
 #endif
-	WGPUCommandEncoder encoder = wgpuDeviceCreateCommandEncoder(m_wgpuCtx.device.get(), &encoderDesc);
+	WgpuCommandEncoderPtr encoder(
+			wgpuDeviceCreateCommandEncoder(m_wgpuCtx.device.get(), &encoderDesc),
+			wgpuCommandEncoderRelease
+	);
 
 	static unsigned long tick = 0;
 	static double colorVal = 0;
@@ -453,7 +464,7 @@ void App::Tick()
 
 	// Next create the render pass encoder
 	WGPURenderPassColorAttachment renderPassColorAttachment{};
-	renderPassColorAttachment.view = nextTextureView;
+	renderPassColorAttachment.view = nextTextureView.get();
 	renderPassColorAttachment.resolveTarget = nullptr;
 	renderPassColorAttachment.loadOp = WGPULoadOp_Clear;
 	renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
@@ -472,11 +483,13 @@ void App::Tick()
 	renderPassDesc.timestampWrites = nullptr;
 
 	// Use render pipeline created during initialization to make a draw call
-	WGPURenderPassEncoder renderPass = wgpuCommandEncoderBeginRenderPass(encoder, &renderPassDesc);
-	wgpuRenderPassEncoderSetPipeline(renderPass, m_wgpuCtx.pipeline.get());
-	wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
-	wgpuRenderPassEncoderEnd(renderPass);
-	wgpuRenderPassEncoderRelease(renderPass);
+	WgpuRenderPassEncoderPtr renderPass(
+			wgpuCommandEncoderBeginRenderPass(encoder.get(), &renderPassDesc),
+			wgpuRenderPassEncoderRelease
+	);
+	wgpuRenderPassEncoderSetPipeline(renderPass.get(), m_wgpuCtx.pipeline.get());
+	wgpuRenderPassEncoderDraw(renderPass.get(), 3, 1, 0, 0);
+	wgpuRenderPassEncoderEnd(renderPass.get());
 
 	// create the command
 	WGPUCommandBufferDescriptor cmdBufferDesc{};
@@ -486,20 +499,20 @@ void App::Tick()
 #else
 	cmdBufferDesc.label = "Command Buffer";
 #endif
-	WGPUCommandBuffer command = wgpuCommandEncoderFinish(encoder, &cmdBufferDesc);
+	WgpuCommandBufferPtr command(
+			wgpuCommandEncoderFinish(encoder.get(), &cmdBufferDesc),
+			wgpuCommandBufferRelease
+	);
 
-	// Submit the command to the queue
-	wgpuQueueSubmit(m_wgpuCtx.queue.get(), 1, &command);
+	{
+		// Submit the command to the queue
+		WGPUCommandBuffer buf = command.get();  // Hack to get the address of the pointer
+		wgpuQueueSubmit(m_wgpuCtx.queue.get(), 1, &buf);
+	}
 
 #if !defined(WEBGPU_BACKEND_EMSCRIPTEN)
 	wgpuSurfacePresent(m_wgpuCtx.surface.get());
 #endif
-
-	// Cleanup
-	wgpuCommandEncoderRelease(encoder);
-	wgpuCommandBufferRelease(command);
-	wgpuTextureViewRelease(nextTextureView);
-	wgpuTextureRelease(texture);  // WGPU requires releasing texture after texture view
 
 #if defined(WEBGPU_BACKEND_DAWN)
 	wgpuDeviceTick(m_wgpuCtx.device.get());
