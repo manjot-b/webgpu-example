@@ -25,7 +25,14 @@ App::~App()
 
 void App::Terminate()
 {
+	// In Dawn, when releasing WGPUSurface an error gets thrown and program
+	// aborts. This is because WgpuContext is a struct and assigning brace
+	// init '{}' to it will destroy it's members in forward order of
+	// declaration instead of reverse. So device gets destroyed before
+	// surface causing the error. To resolve destroy the surface first.
+	m_wgpuCtx.surface.reset();
 	m_wgpuCtx = {};
+
 	m_pWindow.reset();
 	glfwTerminate();
 	m_initialized = false;
@@ -237,7 +244,7 @@ App::WgpuContext App::WgpuInitialize()
 	deviceDesc.label = {"My Device", WGPU_STRLEN};
 	deviceDesc.defaultQueue.label = {"Default Queue", WGPU_STRLEN};
 	deviceDesc.deviceLostCallbackInfo.nextInChain = nullptr;
-	deviceDesc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+	deviceDesc.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowSpontaneous;
 	deviceDesc.deviceLostCallbackInfo.callback = onDeviceLost;
 	deviceDesc.uncapturedErrorCallbackInfo.nextInChain = nullptr;
 	deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
@@ -291,7 +298,7 @@ App::WgpuContext App::WgpuInitialize()
 
 	#if !defined(WEBGPU_FUTURE_UNIMPLEMENTED)
 		WGPUFutureWaitInfo queueFutureWait{queueFuture, false};
-		wgpuInstanceWaitAny(ctx.instance.get(), 1, &queueFutureWait, 0);
+		while (wgpuInstanceWaitAny(ctx.instance.get(), 1, &queueFutureWait, 0) != WGPUWaitStatus_Success);
 	#endif
 #else
 	wgpuQueueOnSubmittedWorkDone(ctx.queue.get(), onQueueWorkDone, nullptr);
@@ -554,8 +561,10 @@ std::tuple<WGPUTextureView, WGPUTexture> App::GetNextSurfaceTextureView()
 #if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 		case WGPUSurfaceGetCurrentTextureStatus_Error:
 #endif
+#if !defined(WEBGPU_BACKEND_DAWN)
 		case WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:
 		case WGPUSurfaceGetCurrentTextureStatus_DeviceLost:
+#endif
 		case WGPUSurfaceGetCurrentTextureStatus_Force32:
 			std::cerr << "Texture could not be retrieved. Error: " << std::hex << surfaceTexture.status << std::dec << std::endl;
 			return {nullptr, nullptr};

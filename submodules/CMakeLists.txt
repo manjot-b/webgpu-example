@@ -9,12 +9,12 @@ else()
 	target_link_options(glfw INTERFACE -sUSE_GLFW=3)
 endif()
 
-#add_subdirectory(webgpu)
-
 string(TOUPPER ${WEBGPU_BACKEND} WEBGPU_BACKEND_U)
 if (NOT EMSCRIPTEN AND WEBGPU_BACKEND_U STREQUAL "WGPU")
 	include(wgpu.cmake)
-elseif (EMSCRIPTEN OR WEBGPU_BACKEND_U STREQUAL "Emscripten")
+elseif(NOT EMSCRIPTEN AND WEBGPU_BACKEND_U STREQUAL "DAWN")
+	include(dawn.cmake)
+elseif (EMSCRIPTEN OR WEBGPU_BACKEND_U STREQUAL "EMSCRIPTEN")
 	include(webgpu_emscripten.cmake)
 endif()
 

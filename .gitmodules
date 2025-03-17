@@ -7,3 +7,7 @@
 [submodule "submodules/wgpu"]
 	path = submodules/wgpu
 	url = https://github.com/gfx-rs/wgpu-native.git
+[submodule "submodules/dawn"]
+	path = submodules/dawn
+	url = https://dawn.googlesource.com/dawn
+	branch = chromium/7070

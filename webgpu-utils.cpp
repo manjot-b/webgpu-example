@@ -57,7 +57,6 @@ WGPUAdapter requestAdapter(WGPUInstance instance, const WGPURequestAdapterOption
 	[[maybe_unused]]WGPUFuture future = wgpuInstanceRequestAdapter(instance, options, callbackInfo);
 
 	#if !defined(WEBGPU_FUTURE_UNIMPLEMENTED)
-		// TODO: Wait on Future once implemented
 		WGPUFutureWaitInfo futureWait;
 		futureWait.future = future;
 		futureWait.completed = false;
@@ -116,7 +115,6 @@ WGPUDevice requestDevice([[maybe_unused]]WGPUInstance instance, WGPUAdapter adap
 	[[maybe_unused]]WGPUFuture future = wgpuAdapterRequestDevice(adapter, descriptor, callbackInfo);
 
 	#if !defined(WEBGPU_FUTURE_UNIMPLEMENTED)
-		// TODO: Wait on Future once implemented
 		WGPUFutureWaitInfo futureWait;
 		futureWait.future = future;
 		futureWait.completed = false;

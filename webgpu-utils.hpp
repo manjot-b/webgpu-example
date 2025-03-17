@@ -10,8 +10,10 @@
 std::ostream& operator<<(std::ostream& os, WGPUStringView strView);
 #endif
 
-// WGPUFuture is currently on implemtened.
+// WGPUFuture is currently only implemtened in DAWN
+#if defined(WEBGPU_BACKEND_WGPU) || defined(WEBGPU_BACKEND_EMSCRIPTEN)
 #define WEBGPU_FUTURE_UNIMPLEMENTED
+#endif
 
 namespace wgpuUtils{
 
