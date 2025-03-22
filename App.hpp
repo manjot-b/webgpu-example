@@ -52,13 +52,33 @@ private:
 		int height;
 	};
 
+	struct WgpuBuffer
+	{
+		// TODO: Handle interleaving multiple attributes
+		WgpuBuffer() :
+			wgpuBuffer(nullptr, wgpuBufferRelease),
+			size(0), count(0), components(1), componentSize(1)
+		{}
+		WgpuBufferPtr wgpuBuffer;
+		size_t size;
+		size_t count;
+		size_t components;
+		size_t componentSize;
+	};
+
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPURequiredLimits GetRequiredLimits(WGPUAdapter adapter) const;
+#else
+	WGPULimits GetRequiredLimits(WGPUAdapter adapter) const;
+#endif
 	void AddDeviceError(WGPUErrorType error, std::string_view message);
 	bool LogDeviceErrors();
 	bool Initialize();
 	GLFWwindow* GlfwInitialize();
 	WgpuContext WgpuInitialize();
+	void BuffersInitialize();
 	WGPURenderPipeline WgpuRenderPipelineInitialize();
-	const char* GetShaderSource();
+	const char* GetShaderSource() const;
 	std::tuple<WGPUTextureView, WGPUTexture> GetNextSurfaceTextureView();
 
 	bool m_initialized;
@@ -69,4 +89,6 @@ private:
 	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
 	GlfwWindowPtr m_pWindow;
 	WindowDimensions m_windowDim;
+
+	WgpuBuffer m_buffer;
 };

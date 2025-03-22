@@ -88,6 +88,7 @@ bool App::Initialize()
 
 	glfwSetWindowUserPointer(m_pWindow.get(), static_cast<void*>(&m_wgpuCtx));
 
+	BuffersInitialize();
 
 	// Init Wgpu Pipeline
 	m_wgpuCtx.pipeline = WgpuRenderPipelinePtr(WgpuRenderPipelineInitialize(), wgpuRenderPipelineRelease);
@@ -126,6 +127,38 @@ GLFWwindow* App::GlfwInitialize()
 	}
 
 	return pWindow;
+}
+
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+WGPURequiredLimits App::GetRequiredLimits(WGPUAdapter adapter) const
+{
+	WGPUSupportedLimits supLimits{};
+	wgpuAdapterGetLimits(adapter, &supLimits);
+	const WGPULimits &supportedLimits = supLimits.limits;
+#else
+WGPULimits App::GetRequiredLimits(WGPUAdapter adapter) const
+{
+	WGPULimits supportedLimits{};
+	wgpuAdapterGetLimits(adapter, &supportedLimits);
+#endif
+
+	// Good practice to set these limits as low as possible to support the largest amount of devices
+	WGPULimits limits = supportedLimits;
+	limits.maxVertexAttributes =        1;
+	limits.maxVertexBuffers =           1;
+	limits.maxBufferSize =              6 * 2 * sizeof(float);
+	limits.maxVertexBufferArrayStride = 2 * sizeof(float);
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	limits.maxInterStageShaderComponents = WGPU_LIMIT_U32_UNDEFINED;  // This is removed in latest webgpu but firefox complains about this
+#endif
+
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPURequiredLimits reqLimits{};
+	reqLimits.limits = limits;
+	return reqLimits;
+#else
+	return limits;
+#endif
 }
 
 App::WgpuContext App::WgpuInitialize()
@@ -198,6 +231,7 @@ App::WgpuContext App::WgpuInitialize()
 	std::cout << "Got adapter: " << ctx.adapter.get() << std::endl;
 	wgpuUtils::printAdapterFeatures(ctx.adapter.get());
 	wgpuUtils::printAdapterProperties(ctx.adapter.get());
+	wgpuUtils::printAdapterLimits(ctx.adapter.get());
 
 	auto onDeviceError = [](
 #if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
@@ -238,9 +272,10 @@ App::WgpuContext App::WgpuInitialize()
 	WGPUDeviceDescriptor deviceDesc{};
 	deviceDesc.nextInChain = nullptr;
 	deviceDesc.requiredFeatureCount = 0;
-	deviceDesc.requiredLimits = nullptr;
 	deviceDesc.defaultQueue.nextInChain = nullptr;
 #if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPULimits limits = GetRequiredLimits(ctx.adapter.get());
+	deviceDesc.requiredLimits = &limits;
 	deviceDesc.label = {"My Device", WGPU_STRLEN};
 	deviceDesc.defaultQueue.label = {"Default Queue", WGPU_STRLEN};
 	deviceDesc.deviceLostCallbackInfo.nextInChain = nullptr;
@@ -250,10 +285,13 @@ App::WgpuContext App::WgpuInitialize()
 	deviceDesc.uncapturedErrorCallbackInfo.userdata1 = this;
 	deviceDesc.uncapturedErrorCallbackInfo.callback = onDeviceError;
 #else
+	WGPURequiredLimits limits = GetRequiredLimits(ctx.adapter.get());
+	deviceDesc.requiredLimits = &limits;
 	deviceDesc.label = "My Device";
 	deviceDesc.defaultQueue.label = "Default Queue";
 	deviceDesc.deviceLostCallback = onDeviceLost;
 #endif
+	deviceDesc.requiredLimits = &limits;
 
 	ctx.device = WgpuDevicePtr
 	(
@@ -270,6 +308,8 @@ App::WgpuContext App::WgpuInitialize()
 #if defined (EMSCRIPTEN_WEBGPU_DEPRECATED)
 	wgpuDeviceSetUncapturedErrorCallback(ctx.device.get(), onDeviceError, this);
 #endif
+
+	wgpuUtils::printDeviceLimits(ctx.device.get());
 
 	// Get the queue on the device
 	ctx.queue = WgpuQueuePtr
@@ -310,6 +350,33 @@ App::WgpuContext App::WgpuInitialize()
 	return ctx;
 }
 
+void App::BuffersInitialize()
+{
+	const std::vector<float> verticies = {
+	//    x,   y  counter-clockwise
+		-.5, -.5,
+		 .5, -.5,
+		 .0,  .5,
+
+		 .6, -.5,
+		 .6,  .5,
+		 .1,  .5
+	};
+
+	m_buffer.size = verticies.size() * sizeof(float);
+	m_buffer.count = verticies.size();
+	m_buffer.components = 2;
+	m_buffer.componentSize = sizeof(float);
+
+	WGPUBufferDescriptor bufferDesc{};
+	bufferDesc.size = m_buffer.size;
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
+	bufferDesc.mappedAtCreation = false;
+	m_buffer.wgpuBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
+
+	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_buffer.wgpuBuffer.get(), 0, verticies.data(), m_buffer.size);
+}
+
 WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 {
 	WGPURenderPipelineDescriptor pipelineDesc = {};
@@ -335,8 +402,19 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 	);
 
 	// Vertex state
-	pipelineDesc.vertex.bufferCount = 0;
-	pipelineDesc.vertex.buffers = nullptr;
+	WGPUVertexAttribute posAttrib{};
+	posAttrib.shaderLocation = 0;
+	posAttrib.format = WGPUVertexFormat_Float32x2;
+	posAttrib.offset = 0;
+
+	WGPUVertexBufferLayout vertBufLayout{};
+	vertBufLayout.attributeCount = 1;
+	vertBufLayout.attributes = &posAttrib;
+	vertBufLayout.arrayStride = m_buffer.components * m_buffer.componentSize;
+	vertBufLayout.stepMode = WGPUVertexStepMode_Vertex;
+
+	pipelineDesc.vertex.bufferCount = 1;
+	pipelineDesc.vertex.buffers = &vertBufLayout;
 	pipelineDesc.vertex.module = shaderModule.get();
 #if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	pipelineDesc.vertex.entryPoint = WGPUStringView{"vs_main", WGPU_STRLEN};
@@ -401,24 +479,13 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 	return pipeline;
 }
 
-const char* App::GetShaderSource()
+const char* App::GetShaderSource() const
 {
 	static const char* shaderSource = R"(
 @vertex
-fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f
+fn vs_main(@location(0) in_vertex_pos: vec2f) -> @builtin(position) vec4f
 {
-	var p = vec2f(.0, .0);
-	if (in_vertex_index == 0u) {
-		p = vec2f(-.5, -.5);
-	}
-	else if (in_vertex_index == 1u) {
-		p = vec2f(.5, -.5);
-	}
-	else {
-		p = vec2f(.0, .5);
-	}
-
-	return vec4f(p, .0, 1.);
+	return vec4f(in_vertex_pos, .0, 1.);
 }
 
 @fragment
@@ -495,7 +562,8 @@ void App::Tick()
 			wgpuRenderPassEncoderRelease
 	);
 	wgpuRenderPassEncoderSetPipeline(renderPass.get(), m_wgpuCtx.pipeline.get());
-	wgpuRenderPassEncoderDraw(renderPass.get(), 3, 1, 0, 0);
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass.get(), 0, m_buffer.wgpuBuffer.get(), 0, m_buffer.size);
+	wgpuRenderPassEncoderDraw(renderPass.get(), m_buffer.count / m_buffer.components, 1, 0, 0);
 	wgpuRenderPassEncoderEnd(renderPass.get());
 
 	// create the command

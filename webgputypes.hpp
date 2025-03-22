@@ -23,5 +23,6 @@ WGPU_PTR_ALIAS(CommandEncoder)
 WGPU_PTR_ALIAS(CommandBuffer)
 WGPU_PTR_ALIAS(Texture)
 WGPU_PTR_ALIAS(TextureView)
+WGPU_PTR_ALIAS(Buffer)
 
 #undef WGPU_PTR_ALIAS

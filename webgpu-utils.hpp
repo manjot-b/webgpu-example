@@ -28,5 +28,7 @@ void configureSurface(WGPUSurface surface, WGPUDevice device, WGPUAdapter adapte
 
 void printAdapterFeatures(WGPUAdapter adapter);
 void printAdapterProperties(WGPUAdapter adapter);
+void printAdapterLimits(WGPUAdapter adapter);
+void printDeviceLimits(WGPUDevice device);
 
 } // namespace utils

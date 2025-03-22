@@ -19,6 +19,20 @@ std::ostream& operator<<(std::ostream& os, WGPUStringView strView)
 }
 #endif
 
+namespace{
+
+void printLimits(WGPULimits limits)
+{
+	std::cout << "Max vertex attributes: " << limits.maxVertexAttributes << std::endl;
+	std::cout << "Max compute invocations per workgroup: " << limits.maxComputeInvocationsPerWorkgroup << std::endl;
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	std::cout << "Max inter stage shader components: " << limits.maxInterStageShaderComponents  << std::endl;
+#endif
+	std::cout << std::endl;
+}
+
+} // anonymous namespace
+
 namespace wgpuUtils{
 
 WGPUAdapter requestAdapter(WGPUInstance instance, const WGPURequestAdapterOptions* options)
@@ -159,7 +173,7 @@ void printAdapterFeatures(WGPUAdapter adapter)
 	for (auto f : features)
 		std::cout << "0x" << f << std::endl;
 #endif
-	std::cout << std::dec;
+	std::cout << std::dec << std::endl;
 }
 
 void printAdapterProperties(WGPUAdapter adapter)
@@ -177,7 +191,37 @@ void printAdapterProperties(WGPUAdapter adapter)
 	std::cout << std::hex;
 	std::cout << "adapterType: 0x" << info.adapterType << std::endl;
 	std::cout << "backendType: 0x" << info.backendType << std::endl;
-	std::cout << std::dec;
+	std::cout << std::dec << std::endl;;
+}
+
+void printAdapterLimits(WGPUAdapter adapter)
+{
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPUSupportedLimits supportedLimits{};
+	wgpuAdapterGetLimits(adapter, &supportedLimits);
+	const WGPULimits &limits = supportedLimits.limits;
+#else
+	WGPULimits limits{};
+	wgpuAdapterGetLimits(adapter, &limits);
+#endif
+
+	std::cout << "Adapter limits: " << std::endl;
+	printLimits(limits);
+}
+
+void printDeviceLimits(WGPUDevice device)
+{
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPUSupportedLimits supportedLimits{};
+	wgpuDeviceGetLimits(device, &supportedLimits);
+	const WGPULimits &limits = supportedLimits.limits;
+#else
+	WGPULimits limits{};
+	wgpuDeviceGetLimits(device, &limits);
+#endif
+
+	std::cout << "Device limits: " << std::endl;
+	printLimits(limits);
 }
 
 void configureSurface(WGPUSurface surface, WGPUDevice device, WGPUAdapter adapter, int width, int height)
