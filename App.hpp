@@ -6,6 +6,8 @@
 #include <queue>
 #include <string>
 #include <tuple>
+#include <numeric>
+#include <cassert>
 
 class GLFWwindow;
 
@@ -54,16 +56,22 @@ private:
 
 	struct WgpuBuffer
 	{
-		// TODO: Handle interleaving multiple attributes
 		WgpuBuffer() :
-			wgpuBuffer(nullptr, wgpuBufferRelease),
-			size(0), count(0), components(1), componentSize(1)
+			m_wgpuBuffer(nullptr, wgpuBufferRelease),
+			m_size(0), m_count(0), m_components(1), m_componentSize(1)
 		{}
-		WgpuBufferPtr wgpuBuffer;
-		size_t size;
-		size_t count;
-		size_t components;
-		size_t componentSize;
+
+		bool SetInfo(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer);
+
+		WgpuBufferPtr m_wgpuBuffer;
+		size_t m_size;
+		size_t m_count;
+		size_t m_components;
+		size_t m_componentSize;
+		size_t m_stride;
+		size_t m_attributes;
+		std::vector<size_t> m_attributeComponents;
+		std::vector<size_t> m_attributeOffset;
 	};
 
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)

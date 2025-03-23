@@ -7,6 +7,7 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <sstream>
+#include <array>
 
 #include "glfw3webgpu.hpp"
 #include "webgpu-utils.hpp"
@@ -144,10 +145,10 @@ WGPULimits App::GetRequiredLimits(WGPUAdapter adapter) const
 
 	// Good practice to set these limits as low as possible to support the largest amount of devices
 	WGPULimits limits = supportedLimits;
-	limits.maxVertexAttributes =        1;
+	limits.maxVertexAttributes =        2;
 	limits.maxVertexBuffers =           1;
-	limits.maxBufferSize =              6 * 2 * sizeof(float);
-	limits.maxVertexBufferArrayStride = 2 * sizeof(float);
+	limits.maxBufferSize =              6 * 5 * sizeof(float);
+	limits.maxVertexBufferArrayStride = 5 * sizeof(float);
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	limits.maxInterStageShaderComponents = WGPU_LIMIT_U32_UNDEFINED;  // This is removed in latest webgpu but firefox complains about this
 #endif
@@ -353,28 +354,62 @@ App::WgpuContext App::WgpuInitialize()
 void App::BuffersInitialize()
 {
 	const std::vector<float> verticies = {
-	//    x,   y  counter-clockwise
-		-.5, -.5,
-		 .5, -.5,
-		 .0,  .5,
+	//    x,    y,   r,   g,   b
+		-0.5, -0.5, 1.0, 0.0, 0.0,
+		 0.5, -0.5, 1.0, 1.0, 0.0,
+		 0.0,  0.5, 0.0, 0.0, 1.0,
 
-		 .6, -.5,
-		 .6,  .5,
-		 .1,  .5
+		 0.6, -0.5, 1.0, 1.0, 0.0,
+		 0.6,  0.5, 1.0, 0.0, 1.0,
+		 0.1,  0.5, 0.0, 1.0, 1.0,
 	};
 
-	m_buffer.size = verticies.size() * sizeof(float);
-	m_buffer.count = verticies.size();
-	m_buffer.components = 2;
-	m_buffer.componentSize = sizeof(float);
-
 	WGPUBufferDescriptor bufferDesc{};
-	bufferDesc.size = m_buffer.size;
+	bufferDesc.size = verticies.size() * sizeof(verticies[0]);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
 	bufferDesc.mappedAtCreation = false;
-	m_buffer.wgpuBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
+	WgpuBufferPtr wgpuBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
 
-	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_buffer.wgpuBuffer.get(), 0, verticies.data(), m_buffer.size);
+	const std::vector<size_t> attribComponents = {2, 3};
+	m_buffer.SetInfo(verticies.size(), sizeof(verticies[0]), std::move(attribComponents), std::move(wgpuBuffer));
+
+	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_buffer.m_wgpuBuffer.get(), 0, verticies.data(), m_buffer.m_size);
+}
+
+bool App::WgpuBuffer::SetInfo(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer)
+{
+	if (count == 0 || componentSize == 0 || attributeComponents.size() == 0)
+		return true;
+
+	m_count = count;
+	m_size = count * componentSize;
+
+	m_components = std::accumulate(attributeComponents.begin(), attributeComponents.end(), 0);
+	m_componentSize = componentSize;
+
+	const bool validInfo = ( (m_components > 0) && (m_count % m_components) == 0);
+	if (!validInfo)
+	{
+		assert(validInfo && "Valid attribute sizes not given");
+		return false;
+	}
+
+	m_stride = m_components * m_componentSize;
+	m_attributes = attributeComponents.size();
+
+	m_attributeOffset.resize(attributeComponents.size());
+	for (size_t i = 0; i < attributeComponents.size(); ++i)
+	{
+		if (i == 0)
+			m_attributeOffset[i] = 0;
+		else
+			m_attributeOffset[i] = (attributeComponents[i-1] * componentSize);
+	}
+
+	m_attributeComponents = std::move(attributeComponents);
+	m_wgpuBuffer = std::move(wgpuBuffer);
+
+	return true;
 }
 
 WGPURenderPipeline App::WgpuRenderPipelineInitialize()
@@ -402,15 +437,20 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 	);
 
 	// Vertex state
-	WGPUVertexAttribute posAttrib{};
-	posAttrib.shaderLocation = 0;
-	posAttrib.format = WGPUVertexFormat_Float32x2;
-	posAttrib.offset = 0;
+	std::array<WGPUVertexAttribute, 2> vertAttribs;
+	// pos
+	vertAttribs[0].shaderLocation = 0;
+	vertAttribs[0].format = WGPUVertexFormat_Float32x2;
+	vertAttribs[0].offset = m_buffer.m_attributeOffset[0];
+	// color
+	vertAttribs[1].shaderLocation = 1;
+	vertAttribs[1].format = WGPUVertexFormat_Float32x3;
+	vertAttribs[1].offset = m_buffer.m_attributeOffset[1];
 
 	WGPUVertexBufferLayout vertBufLayout{};
-	vertBufLayout.attributeCount = 1;
-	vertBufLayout.attributes = &posAttrib;
-	vertBufLayout.arrayStride = m_buffer.components * m_buffer.componentSize;
+	vertBufLayout.attributeCount = vertAttribs.size();
+	vertBufLayout.attributes = vertAttribs.data();
+	vertBufLayout.arrayStride = m_buffer.m_stride;
 	vertBufLayout.stepMode = WGPUVertexStepMode_Vertex;
 
 	pipelineDesc.vertex.bufferCount = 1;
@@ -482,16 +522,32 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 const char* App::GetShaderSource() const
 {
 	static const char* shaderSource = R"(
-@vertex
-fn vs_main(@location(0) in_vertex_pos: vec2f) -> @builtin(position) vec4f
+struct VertexInput
 {
-	return vec4f(in_vertex_pos, .0, 1.);
+	@location(0) position: vec2f,
+	@location(1) color: vec3f,
+};
+
+struct VertexOutput
+{
+	@builtin(position) position: vec4f,
+	@location(0) color: vec3f,
+}
+
+@vertex
+fn vs_main(in: VertexInput) -> VertexOutput
+{
+	var out: VertexOutput;
+	out.position = vec4f(in.position, 0.0, 1.0);
+	out.color = in.color;
+
+	return out;
 }
 
 @fragment
-fn fs_main() -> @location(0) vec4f
+fn fs_main(in: VertexOutput) -> @location(0) vec4f  // output location is the ColorAttachment
 {
-	return vec4f(.0, .6, .9, 1.);
+	return vec4f(in.color, 1.0);
 })";
 
 	return shaderSource;
@@ -562,8 +618,8 @@ void App::Tick()
 			wgpuRenderPassEncoderRelease
 	);
 	wgpuRenderPassEncoderSetPipeline(renderPass.get(), m_wgpuCtx.pipeline.get());
-	wgpuRenderPassEncoderSetVertexBuffer(renderPass.get(), 0, m_buffer.wgpuBuffer.get(), 0, m_buffer.size);
-	wgpuRenderPassEncoderDraw(renderPass.get(), m_buffer.count / m_buffer.components, 1, 0, 0);
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass.get(), 0, m_buffer.m_wgpuBuffer.get(), 0, m_buffer.m_size);
+	wgpuRenderPassEncoderDraw(renderPass.get(), m_buffer.m_count / m_buffer.m_components, 1, 0, 0);
 	wgpuRenderPassEncoderEnd(renderPass.get());
 
 	// create the command
