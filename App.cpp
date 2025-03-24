@@ -147,7 +147,7 @@ WGPULimits App::GetRequiredLimits(WGPUAdapter adapter) const
 	WGPULimits limits = supportedLimits;
 	limits.maxVertexAttributes =        2;
 	limits.maxVertexBuffers =           1;
-	limits.maxBufferSize =              6 * 5 * sizeof(float);
+	limits.maxBufferSize =              8 * 5 * sizeof(float);
 	limits.maxVertexBufferArrayStride = 5 * sizeof(float);
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	limits.maxInterStageShaderComponents = WGPU_LIMIT_U32_UNDEFINED;  // This is removed in latest webgpu but firefox complains about this
@@ -354,26 +354,45 @@ App::WgpuContext App::WgpuInitialize()
 void App::BuffersInitialize()
 {
 	const std::vector<float> verticies = {
-	//    x,    y,   r,   g,   b
+		// x,    y,   r,   g,   b
 		-0.5, -0.5, 1.0, 0.0, 0.0,
-		 0.5, -0.5, 1.0, 1.0, 0.0,
-		 0.0,  0.5, 0.0, 0.0, 1.0,
+		 0.5,  0.5, 0.0, 1.0, 0.0,
+		-0.5,  0.5, 0.0, 0.0, 1.0,
+		 0.5, -0.5, 0.0, 0.4, 0.6,
 
-		 0.6, -0.5, 1.0, 1.0, 0.0,
-		 0.6,  0.5, 1.0, 0.0, 1.0,
-		 0.1,  0.5, 0.0, 1.0, 1.0,
+		// Rotated/skewed for anti-aliasing
+		-0.9, -0.8, 1.0, 1.0, 0.0,
+		-0.6,  0.0, 1.0, 0.0, 1.0,
+		-0.7,  0.5, 0.0, 1.0, 1.0,
 	};
 
+	const std::vector<uint32_t> indicies = {
+		0, 1, 2,
+		0, 3, 1,
+		4, 5, 6,
+	};
+
+	// Vertex buffer
 	WGPUBufferDescriptor bufferDesc{};
 	bufferDesc.size = verticies.size() * sizeof(verticies[0]);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Vertex;
 	bufferDesc.mappedAtCreation = false;
 	WgpuBufferPtr wgpuBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
 
-	const std::vector<size_t> attribComponents = {2, 3};
-	m_buffer.SetInfo(verticies.size(), sizeof(verticies[0]), std::move(attribComponents), std::move(wgpuBuffer));
+	std::vector<size_t> attribComponents = {2, 3};
+	m_verticies = WgpuBuffer(verticies.size(), sizeof(verticies[0]), std::move(attribComponents), std::move(wgpuBuffer));
 
-	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_buffer.m_wgpuBuffer.get(), 0, verticies.data(), m_buffer.m_size);
+	// Index buffer
+	bufferDesc.size = indicies.size() * sizeof(indicies[0]);
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index;
+	bufferDesc.mappedAtCreation = false;
+	wgpuBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
+
+	attribComponents = {1};
+	m_indicies = WgpuBuffer(indicies.size(), sizeof(indicies[0]), std::move(attribComponents), std::move(wgpuBuffer));
+
+	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_verticies.m_wgpuBuffer.get(), 0, verticies.data(), m_verticies.m_size);
+	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_indicies.m_wgpuBuffer.get(), 0, indicies.data(), m_indicies.m_size);
 }
 
 bool App::WgpuBuffer::SetInfo(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer)
@@ -441,16 +460,16 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 	// pos
 	vertAttribs[0].shaderLocation = 0;
 	vertAttribs[0].format = WGPUVertexFormat_Float32x2;
-	vertAttribs[0].offset = m_buffer.m_attributeOffset[0];
+	vertAttribs[0].offset = m_verticies.m_attributeOffset[0];
 	// color
 	vertAttribs[1].shaderLocation = 1;
 	vertAttribs[1].format = WGPUVertexFormat_Float32x3;
-	vertAttribs[1].offset = m_buffer.m_attributeOffset[1];
+	vertAttribs[1].offset = m_verticies.m_attributeOffset[1];
 
 	WGPUVertexBufferLayout vertBufLayout{};
 	vertBufLayout.attributeCount = vertAttribs.size();
 	vertBufLayout.attributes = vertAttribs.data();
-	vertBufLayout.arrayStride = m_buffer.m_stride;
+	vertBufLayout.arrayStride = m_verticies.m_stride;
 	vertBufLayout.stepMode = WGPUVertexStepMode_Vertex;
 
 	pipelineDesc.vertex.bufferCount = 1;
@@ -618,8 +637,11 @@ void App::Tick()
 			wgpuRenderPassEncoderRelease
 	);
 	wgpuRenderPassEncoderSetPipeline(renderPass.get(), m_wgpuCtx.pipeline.get());
-	wgpuRenderPassEncoderSetVertexBuffer(renderPass.get(), 0, m_buffer.m_wgpuBuffer.get(), 0, m_buffer.m_size);
-	wgpuRenderPassEncoderDraw(renderPass.get(), m_buffer.m_count / m_buffer.m_components, 1, 0, 0);
+
+	wgpuRenderPassEncoderSetVertexBuffer(renderPass.get(), 0, m_verticies.m_wgpuBuffer.get(), 0, m_verticies.m_size);
+	wgpuRenderPassEncoderSetIndexBuffer(renderPass.get(), m_indicies.m_wgpuBuffer.get(), WGPUIndexFormat_Uint32, 0, m_indicies.m_size);
+
+	wgpuRenderPassEncoderDrawIndexed(renderPass.get(), m_indicies.m_count, 1, 0, 0, 0);
 	wgpuRenderPassEncoderEnd(renderPass.get());
 
 	// create the command

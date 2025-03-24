@@ -58,8 +58,14 @@ private:
 	{
 		WgpuBuffer() :
 			m_wgpuBuffer(nullptr, wgpuBufferRelease),
-			m_size(0), m_count(0), m_components(1), m_componentSize(1)
+			m_size{}, m_count{}, m_components{}, m_componentSize{}, m_stride{}, m_attributes{}
 		{}
+
+		WgpuBuffer(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer) :
+			WgpuBuffer()
+		{
+			SetInfo(count, componentSize, std::move(attributeComponents), std::move(wgpuBuffer));
+		}
 
 		bool SetInfo(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer);
 
@@ -98,5 +104,6 @@ private:
 	GlfwWindowPtr m_pWindow;
 	WindowDimensions m_windowDim;
 
-	WgpuBuffer m_buffer;
+	WgpuBuffer m_verticies;
+	WgpuBuffer m_indicies;
 };
