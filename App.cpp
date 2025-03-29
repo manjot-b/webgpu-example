@@ -32,6 +32,8 @@ void App::Terminate()
 	// declaration instead of reverse. So device gets destroyed before
 	// surface causing the error. To resolve destroy the surface first.
 	m_wgpuCtx.surface.reset();
+	m_indicies.m_wgpuBuffer.reset();
+	m_verticies.m_wgpuBuffer.reset();
 	m_wgpuCtx = {};
 
 	m_pWindow.reset();
@@ -346,6 +348,14 @@ App::WgpuContext App::WgpuInitialize()
 #endif  // EMSCRIPTEN_WEBGPU_DEPRECATED
 
 	wgpuUtils::configureSurface(ctx.surface.get(), ctx.device.get(), ctx.adapter.get(), m_windowDim.width, m_windowDim.height);
+
+#if !defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPUTextureFormat textureFormat = wgpuUtils::getPreferredFormat(ctx.adapter.get(), ctx.surface.get());
+#else
+	WGPUTextureFormat textureFormat = wgpuSurfaceGetPreferredFormat(m_wgpuCtx.surface.get(), m_wgpuCtx.adapter.get());
+#endif
+
+	std::cout << "Preferred Format: " << std::hex << textureFormat << std::endl;
 
 	ctx.initialized = true;
 	return ctx;
