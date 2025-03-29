@@ -24,5 +24,8 @@ WGPU_PTR_ALIAS(CommandBuffer)
 WGPU_PTR_ALIAS(Texture)
 WGPU_PTR_ALIAS(TextureView)
 WGPU_PTR_ALIAS(Buffer)
+WGPU_PTR_ALIAS(PipelineLayout)
+WGPU_PTR_ALIAS(BindGroupLayout)
+WGPU_PTR_ALIAS(BindGroup)
 
 #undef WGPU_PTR_ALIAS

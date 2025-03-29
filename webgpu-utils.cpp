@@ -1,4 +1,5 @@
 #include "webgpu-utils.hpp"
+#include <webgpu/webgpu.h>
 
 #if defined(WEBGPU_BACKEND_EMSCRIPTEN)
 #include <emscripten.h>
@@ -261,5 +262,42 @@ WGPUTextureFormat getPreferredFormat(WGPUAdapter adapter, WGPUSurface surface)
 	return preferredFormat;
 }
 #endif
+
+template <>
+WGPUBindGroupLayoutEntry  getDefault()
+{
+	WGPUBindGroupLayoutEntry bindGroupEntry;
+
+	bindGroupEntry.nextInChain = nullptr;
+	bindGroupEntry.binding = 0;
+	bindGroupEntry.visibility = WGPUShaderStage_None;
+
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	bindGroupEntry.buffer.type = WGPUBufferBindingType_Undefined;
+	bindGroupEntry.sampler.type = WGPUSamplerBindingType_Undefined;
+	bindGroupEntry.storageTexture.access = WGPUStorageTextureAccess_Undefined;
+	bindGroupEntry.texture.sampleType = WGPUTextureSampleType_Undefined;
+#else
+	bindGroupEntry.buffer.type = WGPUBufferBindingType_BindingNotUsed;
+	bindGroupEntry.sampler.type = WGPUSamplerBindingType_BindingNotUsed;
+	bindGroupEntry.storageTexture.access = WGPUStorageTextureAccess_BindingNotUsed;
+	bindGroupEntry.texture.sampleType = WGPUTextureSampleType_BindingNotUsed;
+#endif
+
+	bindGroupEntry.buffer.nextInChain = nullptr;
+	bindGroupEntry.buffer.hasDynamicOffset = false;
+
+	bindGroupEntry.sampler.nextInChain = nullptr;
+
+	bindGroupEntry.storageTexture.nextInChain = nullptr;
+	bindGroupEntry.storageTexture.format = WGPUTextureFormat_Undefined;
+	bindGroupEntry.storageTexture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+	bindGroupEntry.texture.nextInChain = nullptr;
+	bindGroupEntry.texture.multisampled = false;
+	bindGroupEntry.texture.viewDimension = WGPUTextureViewDimension_Undefined;
+
+	return bindGroupEntry;
+}
 
 } // namespace utils

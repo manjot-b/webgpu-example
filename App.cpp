@@ -1,4 +1,5 @@
 #include "App.hpp"
+#include "webgputypes.hpp"
 
 #if defined(WEBGPU_BACKEND_WGPU)
 #include <webgpu/wgpu.h>
@@ -8,12 +9,20 @@
 #include <iostream>
 #include <sstream>
 #include <array>
+#include <numeric>
 
 #include "glfw3webgpu.hpp"
 #include "webgpu-utils.hpp"
 
 
-App::App() : m_terminated(false), m_pWindow(nullptr, [](GLFWwindow*){}), m_windowDim{1280, 720}
+App::App() :
+	m_terminated(false),
+	m_window(nullptr, glfwDestroyWindow),
+	m_windowDim{1280, 720},
+	m_uniforms(nullptr, [](WGPUBuffer){}),
+	m_bindGroupLayout(nullptr, wgpuBindGroupLayoutRelease),
+	m_pipelineLayout(nullptr, wgpuPipelineLayoutRelease),
+	m_bindGroup(nullptr, wgpuBindGroupRelease)
 {
 	m_initialized = Initialize();
 }
@@ -34,10 +43,16 @@ void App::Terminate()
 	m_wgpuCtx.surface.reset();
 	m_indicies.m_wgpuBuffer.reset();
 	m_verticies.m_wgpuBuffer.reset();
+	m_uniforms.reset();
+	m_bindGroupLayout.reset();
+	m_pipelineLayout.reset();
+	m_bindGroup.reset();
+
 	m_wgpuCtx = {};
 
-	m_pWindow.reset();
+	m_window.reset();
 	glfwTerminate();
+
 	m_initialized = false;
 	m_terminated = true;
 }
@@ -67,15 +82,15 @@ bool App::LogDeviceErrors()
 	return true;
 }
 
-bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_pWindow.get()); }
+bool App::IsRunning() const { return m_initialized && !m_terminated && !glfwWindowShouldClose(m_window.get()); }
 
 bool App::IsInitialized() const { return m_initialized; }
 
 bool App::Initialize()
 {
 	// Init Glfw
-	m_pWindow = GlfwWindowPtr(GlfwInitialize(), glfwDestroyWindow);
-	if (m_pWindow == nullptr)
+	m_window = GlfwInitialize();
+	if (m_window == nullptr)
 	{
 		std::cerr << "Could not initialize glfw. Aborting initialization." << std::endl;
 		return false;
@@ -89,7 +104,11 @@ bool App::Initialize()
 		return false;
 	}
 
-	glfwSetWindowUserPointer(m_pWindow.get(), static_cast<void*>(&m_wgpuCtx));
+	glfwSetWindowUserPointer(m_window.get(), static_cast<void*>(this));
+	glfwSetFramebufferSizeCallback(m_window.get(), [](GLFWwindow* pWindow, int width, int height){
+			App &app = *static_cast<App*>(glfwGetWindowUserPointer(pWindow));
+			app.m_windowDim = WindowDimensions{width, height};
+	});
 
 	BuffersInitialize();
 
@@ -101,6 +120,8 @@ bool App::Initialize()
 		return false;
 	}
 
+	WgpuBindGroupsInitialize();
+
 	// On Emscripten the errors might not be captured yet because the callback is asynchronous.
 	if (LogDeviceErrors())
 	{
@@ -111,13 +132,13 @@ bool App::Initialize()
 	return true;
 }
 
-GLFWwindow* App::GlfwInitialize()
+App::GlfwWindowPtr App::GlfwInitialize()
 {
 	// Setup GLFW
 	if (!glfwInit())
 	{
 		std::cerr << "Could not initialize GLFW" << std::endl;
-		return nullptr;
+		return GlfwWindowPtr(nullptr, glfwDestroyWindow);
 	}
 
 	// GLFW is unaware of WebGPU (at the moment) so do not setup any graphics API with it
@@ -126,10 +147,10 @@ GLFWwindow* App::GlfwInitialize()
 	if (!pWindow)
 	{
 		std::cerr << "Could not create window" << std::endl;
-		return nullptr;
+		return GlfwWindowPtr(nullptr, glfwDestroyWindow);
 	}
 
-	return pWindow;
+	return GlfwWindowPtr(pWindow, glfwDestroyWindow);
 }
 
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
@@ -147,10 +168,12 @@ WGPULimits App::GetRequiredLimits(WGPUAdapter adapter) const
 
 	// Good practice to set these limits as low as possible to support the largest amount of devices
 	WGPULimits limits = supportedLimits;
-	limits.maxVertexAttributes =        2;
-	limits.maxVertexBuffers =           1;
-	limits.maxBufferSize =              8 * 5 * sizeof(float);
-	limits.maxVertexBufferArrayStride = 5 * sizeof(float);
+	limits.maxVertexAttributes =         2;
+	limits.maxVertexBuffers =            1;
+	limits.maxBufferSize =               8 * 5 * sizeof(float);
+	limits.maxVertexBufferArrayStride =  5 * sizeof(float);
+	limits.maxBindGroups =               1;
+	limits.maxUniformBufferBindingSize = 16 * 4;
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	limits.maxInterStageShaderComponents = WGPU_LIMIT_U32_UNDEFINED;  // This is removed in latest webgpu but firefox complains about this
 #endif
@@ -205,7 +228,7 @@ App::WgpuContext App::WgpuInitialize()
 	// Retrieving the surface is platform dependant, so use a helper function
 	ctx.surface = WgpuSurfacePtr
 	(
-		glfwCreateWindowWGPUSurface(ctx.instance.get(), m_pWindow.get()),
+		glfwCreateWindowWGPUSurface(ctx.instance.get(), m_window.get()),
 		[](WGPUSurface surface){
 			wgpuSurfaceUnconfigure(surface);
 			wgpuSurfaceRelease(surface);
@@ -371,7 +394,7 @@ void App::BuffersInitialize()
 		 0.5, -0.5, 0.0, 0.4, 0.6,
 
 		// Rotated/skewed for anti-aliasing
-		-0.9, -0.8, 1.0, 1.0, 0.0,
+		-0.9, -0.4, 1.0, 1.0, 0.0,
 		-0.6,  0.0, 1.0, 0.0, 1.0,
 		-0.7,  0.5, 0.0, 1.0, 1.0,
 	};
@@ -403,6 +426,12 @@ void App::BuffersInitialize()
 
 	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_verticies.m_wgpuBuffer.get(), 0, verticies.data(), m_verticies.m_size);
 	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_indicies.m_wgpuBuffer.get(), 0, indicies.data(), m_indicies.m_size);
+
+	// Uniform buffer
+	bufferDesc.size = 4 * sizeof(float);  // needs to be aligned to 4 floats (vec4f)
+	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
+	bufferDesc.mappedAtCreation = false;
+	m_uniforms = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
 }
 
 bool App::WgpuBuffer::SetInfo(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer)
@@ -541,9 +570,29 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 	pipelineDesc.multisample.mask = ~0u;  // Enable all bits
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-	pipelineDesc.layout = nullptr;
+	// Binding Layout
+	WGPUBindGroupLayoutEntry bindingLayout = wgpuUtils::getDefault<WGPUBindGroupLayoutEntry>();
+	bindingLayout.binding = 0;
+	bindingLayout.visibility = WGPUShaderStage_Vertex;
+	bindingLayout.buffer.type = WGPUBufferBindingType_Uniform;
+	bindingLayout.buffer.minBindingSize = 4 * sizeof(float);
+
+	WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc{};
+	bindGroupLayoutDesc.entryCount = 1;
+	bindGroupLayoutDesc.entries = &bindingLayout;
+	WGPUBindGroupLayout bgLayout = wgpuDeviceCreateBindGroupLayout(m_wgpuCtx.device.get(), &bindGroupLayoutDesc);  // Needed to taked address of pointer
+	m_bindGroupLayout = WgpuBindGroupLayoutPtr(bgLayout, wgpuBindGroupLayoutRelease);
+
+	WGPUPipelineLayoutDescriptor pipelineLayoutDesc{};
+	pipelineLayoutDesc.bindGroupLayoutCount = 1;
+	pipelineLayoutDesc.bindGroupLayouts = &bgLayout;
+	m_pipelineLayout = WgpuPipelineLayoutPtr(
+			wgpuDeviceCreatePipelineLayout(m_wgpuCtx.device.get(), &pipelineLayoutDesc),
+			wgpuPipelineLayoutRelease);
+	pipelineDesc.layout = m_pipelineLayout.get();
 
 	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(m_wgpuCtx.device.get(), &pipelineDesc);
+
 
 	return pipeline;
 }
@@ -563,11 +612,13 @@ struct VertexOutput
 	@location(0) color: vec3f,
 }
 
+@group(0) @binding(0) var<uniform> ratio: f32;
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput
 {
 	var out: VertexOutput;
-	out.position = vec4f(in.position, 0.0, 1.0);
+	out.position = vec4f(in.position.x, in.position.y * ratio, 0.0, 1.0);
 	out.color = in.color;
 
 	return out;
@@ -580,6 +631,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f  // output location is the Co
 })";
 
 	return shaderSource;
+}
+
+void App::WgpuBindGroupsInitialize()
+{
+	// Only need to specify binding texture and sampler if binding layout uses them
+	WGPUBindGroupEntry binding{};
+	binding.binding = 0;
+	binding.buffer = m_uniforms.get();
+	binding.offset = 0;
+	binding.size = 4 * sizeof(float);
+
+	WGPUBindGroupDescriptor bindGroupDesc{};
+	bindGroupDesc.layout = m_bindGroupLayout.get();
+	bindGroupDesc.entryCount = 1;
+	bindGroupDesc.entries = &binding;
+	m_bindGroup = WgpuBindGroupPtr(
+			wgpuDeviceCreateBindGroup(m_wgpuCtx.device.get(), &bindGroupDesc),
+			wgpuBindGroupRelease);
 }
 
 void App::Tick()
@@ -598,6 +667,10 @@ void App::Tick()
 		nextTexture = WgpuTexturePtr(texture, wgpuTextureRelease);
 		nextTextureView = WgpuTextureViewPtr(textureView, wgpuTextureViewRelease);
 	}
+
+	// Update uniforms
+	float ratio = static_cast<float>(m_windowDim.width) / m_windowDim.height;
+	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_uniforms.get(), 0, &ratio, sizeof(ratio));
 
 	// First create the command encoder for this frame
 	WGPUCommandEncoderDescriptor encoderDesc{};
@@ -650,6 +723,8 @@ void App::Tick()
 
 	wgpuRenderPassEncoderSetVertexBuffer(renderPass.get(), 0, m_verticies.m_wgpuBuffer.get(), 0, m_verticies.m_size);
 	wgpuRenderPassEncoderSetIndexBuffer(renderPass.get(), m_indicies.m_wgpuBuffer.get(), WGPUIndexFormat_Uint32, 0, m_indicies.m_size);
+
+	wgpuRenderPassEncoderSetBindGroup(renderPass.get(), 0, m_bindGroup.get(), 0, nullptr);
 
 	wgpuRenderPassEncoderDrawIndexed(renderPass.get(), m_indicies.m_count, 1, 0, 0, 0);
 	wgpuRenderPassEncoderEnd(renderPass.get());
@@ -709,7 +784,7 @@ std::tuple<WGPUTextureView, WGPUTexture> App::GetNextSurfaceTextureView()
 			if (surfaceTexture.texture != nullptr)
 				wgpuTextureRelease(surfaceTexture.texture);
 
-			glfwGetWindowSize(m_pWindow.get(), &m_windowDim.width, &m_windowDim.height);
+			glfwGetWindowSize(m_window.get(), &m_windowDim.width, &m_windowDim.height);
 			wgpuUtils::configureSurface(m_wgpuCtx.surface.get(), m_wgpuCtx.device.get(), m_wgpuCtx.adapter.get(), m_windowDim.width, m_windowDim.height);
 
 			return {nullptr, nullptr};

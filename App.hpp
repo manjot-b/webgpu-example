@@ -6,7 +6,6 @@
 #include <queue>
 #include <string>
 #include <tuple>
-#include <numeric>
 #include <cassert>
 
 class GLFWwindow;
@@ -80,6 +79,8 @@ private:
 		std::vector<size_t> m_attributeOffset;
 	};
 
+	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
+
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	WGPURequiredLimits GetRequiredLimits(WGPUAdapter adapter) const;
 #else
@@ -87,12 +88,15 @@ private:
 #endif
 	void AddDeviceError(WGPUErrorType error, std::string_view message);
 	bool LogDeviceErrors();
+
 	bool Initialize();
-	GLFWwindow* GlfwInitialize();
+	GlfwWindowPtr GlfwInitialize();
 	WgpuContext WgpuInitialize();
 	void BuffersInitialize();
 	WGPURenderPipeline WgpuRenderPipelineInitialize();
+	void WgpuBindGroupsInitialize();
 	const char* GetShaderSource() const;
+
 	std::tuple<WGPUTextureView, WGPUTexture> GetNextSurfaceTextureView();
 
 	bool m_initialized;
@@ -100,10 +104,14 @@ private:
 	WgpuContext m_wgpuCtx;
 	std::queue<WgpuError> m_wgpuErrors;
 
-	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
-	GlfwWindowPtr m_pWindow;
+	GlfwWindowPtr m_window;
 	WindowDimensions m_windowDim;
 
 	WgpuBuffer m_verticies;
 	WgpuBuffer m_indicies;
+
+	WgpuBufferPtr m_uniforms;
+	WgpuBindGroupLayoutPtr m_bindGroupLayout;
+	WgpuPipelineLayoutPtr m_pipelineLayout;
+	WgpuBindGroupPtr m_bindGroup;
 };

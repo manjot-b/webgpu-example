@@ -31,4 +31,7 @@ void printAdapterProperties(WGPUAdapter adapter);
 void printAdapterLimits(WGPUAdapter adapter);
 void printDeviceLimits(WGPUDevice device);
 
+template <class T>
+T getDefault();
+
 } // namespace utils
