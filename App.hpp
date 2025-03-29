@@ -93,7 +93,7 @@ private:
 	GlfwWindowPtr GlfwInitialize();
 	WgpuContext WgpuInitialize();
 	void BuffersInitialize();
-	WGPURenderPipeline WgpuRenderPipelineInitialize();
+	WgpuRenderPipelinePtr WgpuRenderPipelineInitialize();
 	void WgpuBindGroupsInitialize();
 	const char* GetShaderSource() const;
 

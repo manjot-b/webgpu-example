@@ -113,7 +113,7 @@ bool App::Initialize()
 	BuffersInitialize();
 
 	// Init Wgpu Pipeline
-	m_wgpuCtx.pipeline = WgpuRenderPipelinePtr(WgpuRenderPipelineInitialize(), wgpuRenderPipelineRelease);
+	m_wgpuCtx.pipeline = WgpuRenderPipelineInitialize();
 	if (!m_wgpuCtx.pipeline)
 	{
 		std::cerr << "Could not initialize WebGPU pipeline. Aborting initialization." << std::endl;
@@ -470,7 +470,7 @@ bool App::WgpuBuffer::SetInfo(size_t count, size_t componentSize, std::vector<si
 	return true;
 }
 
-WGPURenderPipeline App::WgpuRenderPipelineInitialize()
+WgpuRenderPipelinePtr App::WgpuRenderPipelineInitialize()
 {
 	WGPURenderPipelineDescriptor pipelineDesc = {};
 	pipelineDesc.nextInChain = nullptr;
@@ -591,10 +591,10 @@ WGPURenderPipeline App::WgpuRenderPipelineInitialize()
 			wgpuPipelineLayoutRelease);
 	pipelineDesc.layout = m_pipelineLayout.get();
 
-	WGPURenderPipeline pipeline = wgpuDeviceCreateRenderPipeline(m_wgpuCtx.device.get(), &pipelineDesc);
-
-
-	return pipeline;
+	return WgpuRenderPipelinePtr(
+			wgpuDeviceCreateRenderPipeline(m_wgpuCtx.device.get(), &pipelineDesc),
+			wgpuRenderPipelineRelease
+		);
 }
 
 const char* App::GetShaderSource() const
