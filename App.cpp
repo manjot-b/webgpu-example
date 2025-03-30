@@ -14,16 +14,18 @@
 #include "glfw3webgpu.hpp"
 #include "webgpu-utils.hpp"
 
-
 App::App() :
 	m_terminated(false),
 	m_window(nullptr, glfwDestroyWindow),
 	m_windowDim{1280, 720},
-	m_uniforms(nullptr, [](WGPUBuffer){}),
+	m_uniformsBuffer(nullptr, [](WGPUBuffer){}),
 	m_bindGroupLayout(nullptr, wgpuBindGroupLayoutRelease),
 	m_pipelineLayout(nullptr, wgpuPipelineLayoutRelease),
 	m_bindGroup(nullptr, wgpuBindGroupRelease)
 {
+	m_uniforms.ratio = static_cast<float>(m_windowDim.width) / m_windowDim.height;
+	m_uniforms.color = {};
+
 	m_initialized = Initialize();
 }
 
@@ -43,7 +45,7 @@ void App::Terminate()
 	m_wgpuCtx.surface.reset();
 	m_indicies.m_wgpuBuffer.reset();
 	m_verticies.m_wgpuBuffer.reset();
-	m_uniforms.reset();
+	m_uniformsBuffer.reset();
 	m_bindGroupLayout.reset();
 	m_pipelineLayout.reset();
 	m_bindGroup.reset();
@@ -108,6 +110,7 @@ bool App::Initialize()
 	glfwSetFramebufferSizeCallback(m_window.get(), [](GLFWwindow* pWindow, int width, int height){
 			App &app = *static_cast<App*>(glfwGetWindowUserPointer(pWindow));
 			app.m_windowDim = WindowDimensions{width, height};
+			app.m_uniforms.ratio = static_cast<float>(width) / height;
 	});
 
 	BuffersInitialize();
@@ -173,7 +176,7 @@ WGPULimits App::GetRequiredLimits(WGPUAdapter adapter) const
 	limits.maxBufferSize =               8 * 5 * sizeof(float);
 	limits.maxVertexBufferArrayStride =  5 * sizeof(float);
 	limits.maxBindGroups =               1;
-	limits.maxUniformBufferBindingSize = 16 * 4;
+	limits.maxUniformBufferBindingSize = 16 * sizeof(float);
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	limits.maxInterStageShaderComponents = WGPU_LIMIT_U32_UNDEFINED;  // This is removed in latest webgpu but firefox complains about this
 #endif
@@ -378,7 +381,7 @@ App::WgpuContext App::WgpuInitialize()
 	WGPUTextureFormat textureFormat = wgpuSurfaceGetPreferredFormat(m_wgpuCtx.surface.get(), m_wgpuCtx.adapter.get());
 #endif
 
-	std::cout << "Preferred Format: " << std::hex << textureFormat << std::endl;
+	std::cout << "Preferred Format: 0x" << std::hex << textureFormat << std::endl;
 
 	ctx.initialized = true;
 	return ctx;
@@ -428,10 +431,10 @@ void App::BuffersInitialize()
 	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_indicies.m_wgpuBuffer.get(), 0, indicies.data(), m_indicies.m_size);
 
 	// Uniform buffer
-	bufferDesc.size = 4 * sizeof(float);  // needs to be aligned to 4 floats (vec4f)
+	bufferDesc.size = sizeof(Uniforms);
 	bufferDesc.usage = WGPUBufferUsage_CopyDst | WGPUBufferUsage_Uniform;
 	bufferDesc.mappedAtCreation = false;
-	m_uniforms = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
+	m_uniformsBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
 }
 
 bool App::WgpuBuffer::SetInfo(size_t count, size_t componentSize, std::vector<size_t> attributeComponents, WgpuBufferPtr wgpuBuffer)
@@ -573,9 +576,9 @@ WgpuRenderPipelinePtr App::WgpuRenderPipelineInitialize()
 	// Binding Layout
 	WGPUBindGroupLayoutEntry bindingLayout = wgpuUtils::getDefault<WGPUBindGroupLayoutEntry>();
 	bindingLayout.binding = 0;
-	bindingLayout.visibility = WGPUShaderStage_Vertex;
+	bindingLayout.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 	bindingLayout.buffer.type = WGPUBufferBindingType_Uniform;
-	bindingLayout.buffer.minBindingSize = 4 * sizeof(float);
+	bindingLayout.buffer.minBindingSize = sizeof(Uniforms);
 
 	WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc{};
 	bindGroupLayoutDesc.entryCount = 1;
@@ -610,15 +613,22 @@ struct VertexOutput
 {
 	@builtin(position) position: vec4f,
 	@location(0) color: vec3f,
-}
+};
 
-@group(0) @binding(0) var<uniform> ratio: f32;
+struct Uniforms
+{
+	ratio: f32,
+	gamma: f32,
+	color: vec4f,  // will be aligned to 16 byte boundary. Cpp struct must match
+};
+
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput
 {
 	var out: VertexOutput;
-	out.position = vec4f(in.position.x, in.position.y * ratio, 0.0, 1.0);
+	out.position = vec4f(in.position.x, in.position.y * uniforms.ratio, 0.0, 1.0);
 	out.color = in.color;
 
 	return out;
@@ -627,7 +637,11 @@ fn vs_main(in: VertexInput) -> VertexOutput
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f  // output location is the ColorAttachment
 {
-	return vec4f(in.color, 1.0);
+	let color = in.color * uniforms.color.rgb;
+
+	// Gamma correction
+	let linearColor = pow(color, vec3f(uniforms.gamma));
+	return vec4f(linearColor, 1.0);
 })";
 
 	return shaderSource;
@@ -638,9 +652,9 @@ void App::WgpuBindGroupsInitialize()
 	// Only need to specify binding texture and sampler if binding layout uses them
 	WGPUBindGroupEntry binding{};
 	binding.binding = 0;
-	binding.buffer = m_uniforms.get();
+	binding.buffer = m_uniformsBuffer.get();
 	binding.offset = 0;
-	binding.size = 4 * sizeof(float);
+	binding.size = sizeof(Uniforms);
 
 	WGPUBindGroupDescriptor bindGroupDesc{};
 	bindGroupDesc.layout = m_bindGroupLayout.get();
@@ -668,9 +682,19 @@ void App::Tick()
 		nextTextureView = WgpuTextureViewPtr(textureView, wgpuTextureViewRelease);
 	}
 
+	static unsigned long tick = 0;
+	static float colorVal = 1.0f;
+	static float delta = .01;
+	if (tick % 10 == 0)
+	{
+		colorVal += delta;
+		if (colorVal < 0 || colorVal > 1) { delta *= -1; }
+	}
+
 	// Update uniforms
-	float ratio = static_cast<float>(m_windowDim.width) / m_windowDim.height;
-	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_uniforms.get(), 0, &ratio, sizeof(ratio));
+	UpdateGamma(nextTexture.get());
+	m_uniforms.color = {colorVal, colorVal, colorVal, 1.0f};
+	wgpuQueueWriteBuffer(m_wgpuCtx.queue.get(), m_uniformsBuffer.get(), 0, &m_uniforms, sizeof(Uniforms));
 
 	// First create the command encoder for this frame
 	WGPUCommandEncoderDescriptor encoderDesc{};
@@ -685,22 +709,13 @@ void App::Tick()
 			wgpuCommandEncoderRelease
 	);
 
-	static unsigned long tick = 0;
-	static double colorVal = 0;
-	static double delta = .01;
-	if (tick % 10 == 0)
-	{
-		colorVal += delta;
-		if (colorVal < 0 || colorVal > 1) { delta *= -1; }
-	}
-
 	// Next create the render pass encoder
 	WGPURenderPassColorAttachment renderPassColorAttachment{};
 	renderPassColorAttachment.view = nextTextureView.get();
 	renderPassColorAttachment.resolveTarget = nullptr;
 	renderPassColorAttachment.loadOp = WGPULoadOp_Clear;
 	renderPassColorAttachment.storeOp = WGPUStoreOp_Store;
-	renderPassColorAttachment.clearValue = WGPUColor{ colorVal, .25, .4, 1.0 };
+	renderPassColorAttachment.clearValue = WGPUColor{ colorVal, .25, .4, 1.0 };  // This will default to sRGB or RGB  depending on preferred texture format
 #if !defined(WEBGPU_BACKEND_WGPU)
 	renderPassColorAttachment.depthSlice = WGPU_DEPTH_SLICE_UNDEFINED;
 #endif
@@ -821,4 +836,17 @@ std::tuple<WGPUTextureView, WGPUTexture> App::GetNextSurfaceTextureView()
 
 	// REMEMBER to release both texture and texture view at end of frame!
 	return {textureView, surfaceTexture.texture};
+}
+
+void App::UpdateGamma(const WGPUTexture texture)
+{
+	switch (wgpuTextureGetFormat(texture))
+	{
+		case WGPUTextureFormat_RGBA8UnormSrgb:
+			m_uniforms.gamma = 2.2f;
+			break;
+		default:
+			m_uniforms.gamma = 1.0f;
+			break;
+	}
 }

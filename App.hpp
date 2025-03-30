@@ -7,6 +7,7 @@
 #include <string>
 #include <tuple>
 #include <cassert>
+#include <array>
 
 class GLFWwindow;
 
@@ -79,6 +80,17 @@ private:
 		std::vector<size_t> m_attributeOffset;
 	};
 
+	struct Uniforms
+	{
+		Uniforms() : ratio(0), color{} {}
+
+		float ratio;
+		float gamma;
+		// vec4f must align on 16 byte boundary. Same for matching struct in WGSL
+		alignas(16) std::array<float, 4> color{};
+	};
+	static_assert(sizeof(Uniforms) % sizeof(std::array<float, 4>) == 0);
+
 	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
 
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
@@ -98,6 +110,7 @@ private:
 	const char* GetShaderSource() const;
 
 	std::tuple<WGPUTextureView, WGPUTexture> GetNextSurfaceTextureView();
+	void  UpdateGamma(const WGPUTexture texture);
 
 	bool m_initialized;
 	bool m_terminated;
@@ -110,8 +123,9 @@ private:
 	WgpuBuffer m_verticies;
 	WgpuBuffer m_indicies;
 
-	WgpuBufferPtr m_uniforms;
+	WgpuBufferPtr m_uniformsBuffer;
 	WgpuBindGroupLayoutPtr m_bindGroupLayout;
 	WgpuPipelineLayoutPtr m_pipelineLayout;
 	WgpuBindGroupPtr m_bindGroup;
+	Uniforms m_uniforms;
 };
