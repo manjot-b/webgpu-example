@@ -37,12 +37,6 @@ App::~App()
 
 void App::Terminate()
 {
-	// In Dawn, when releasing WGPUSurface an error gets thrown and program
-	// aborts. This is because WgpuContext is a struct and assigning brace
-	// init '{}' to it will destroy it's members in forward order of
-	// declaration instead of reverse. So device gets destroyed before
-	// surface causing the error. To resolve destroy the surface first.
-	m_wgpuCtx.surface.reset();
 	m_indicies.m_wgpuBuffer.reset();
 	m_verticies.m_wgpuBuffer.reset();
 	m_uniformsBuffer.reset();
@@ -50,7 +44,8 @@ void App::Terminate()
 	m_pipelineLayout.reset();
 	m_bindGroup.reset();
 
-	m_wgpuCtx = {};
+	// Call dtor so that objects are destroyed in correct order
+	m_wgpuCtx.~WgpuContext();
 
 	m_window.reset();
 	glfwTerminate();
