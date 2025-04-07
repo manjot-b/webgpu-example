@@ -91,6 +91,17 @@ private:
 	};
 	static_assert(sizeof(Uniforms) % sizeof(std::array<float, 4>) == 0);
 
+	struct WgpuTexture
+	{
+		WgpuTexture() :
+			texture(nullptr, wgpuTextureRelease),
+			textureView(nullptr, wgpuTextureViewRelease)
+		{}
+
+		WgpuTexturePtr texture;
+		WgpuTextureViewPtr textureView;
+	};
+
 	using GlfwWindowPtr = std::unique_ptr<GLFWwindow, void(*)(GLFWwindow*)>;
 
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
@@ -107,8 +118,9 @@ private:
 	void BuffersInitialize();
 	WgpuRenderPipelinePtr WgpuRenderPipelineInitialize();
 	void WgpuBindGroupsInitialize();
-	const char* GetShaderSource() const;
+	void WgpuTextureInitialize();
 
+	const char* GetShaderSource() const;
 	std::tuple<WGPUTextureView, WGPUTexture> GetNextSurfaceTextureView();
 	void  UpdateGamma(const WGPUTexture texture);
 
@@ -128,4 +140,6 @@ private:
 	WgpuPipelineLayoutPtr m_pipelineLayout;
 	WgpuBindGroupPtr m_bindGroup;
 	Uniforms m_uniforms;
+
+	WgpuTexture m_texture;
 };

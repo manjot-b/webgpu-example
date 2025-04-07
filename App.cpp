@@ -43,6 +43,7 @@ void App::Terminate()
 	m_bindGroupLayout.reset();
 	m_pipelineLayout.reset();
 	m_bindGroup.reset();
+	m_texture.~WgpuTexture();
 
 	// Call dtor so that objects are destroyed in correct order
 	m_wgpuCtx.~WgpuContext();
@@ -109,6 +110,7 @@ bool App::Initialize()
 	});
 
 	BuffersInitialize();
+	WgpuTextureInitialize();
 
 	// Init Wgpu Pipeline
 	m_wgpuCtx.pipeline = WgpuRenderPipelineInitialize();
@@ -166,12 +168,13 @@ WGPULimits App::GetRequiredLimits(WGPUAdapter adapter) const
 
 	// Good practice to set these limits as low as possible to support the largest amount of devices
 	WGPULimits limits = supportedLimits;
-	limits.maxVertexAttributes =         2;
+	limits.maxVertexAttributes =         3;
 	limits.maxVertexBuffers =            1;
-	limits.maxBufferSize =               8 * 5 * sizeof(float);
-	limits.maxVertexBufferArrayStride =  5 * sizeof(float);
+	limits.maxBufferSize =               4 * 256 * 256;
+	limits.maxVertexBufferArrayStride =  7 * sizeof(float);
 	limits.maxBindGroups =               1;
 	limits.maxUniformBufferBindingSize = 16 * sizeof(float);
+	limits.maxSampledTexturesPerShaderStage = 1;
 #if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
 	limits.maxInterStageShaderComponents = WGPU_LIMIT_U32_UNDEFINED;  // This is removed in latest webgpu but firefox complains about this
 #endif
@@ -385,16 +388,16 @@ App::WgpuContext App::WgpuInitialize()
 void App::BuffersInitialize()
 {
 	const std::vector<float> verticies = {
-		// x,    y,   r,   g,   b
-		-0.5, -0.5, 1.0, 0.0, 0.0,
-		 0.5,  0.5, 0.0, 1.0, 0.0,
-		-0.5,  0.5, 0.0, 0.0, 1.0,
-		 0.5, -0.5, 0.0, 0.4, 0.6,
+		// x,    y,   r,   g,   b,   u,   v
+		-0.5, -0.5, 1.0, 0.0, 0.0, 0.0, 1.0,
+		 0.5,  0.5, 0.0, 1.0, 0.0, 1.0, 0.0,
+		-0.5,  0.5, 0.0, 0.0, 1.0, 0.0, 0.0,
+		 0.5, -0.5, 0.0, 0.4, 0.6, 1.0, 1.0,
 
 		// Rotated/skewed for anti-aliasing
-		-0.9, -0.4, 1.0, 1.0, 0.0,
-		-0.6,  0.0, 1.0, 0.0, 1.0,
-		-0.7,  0.5, 0.0, 1.0, 1.0,
+		-0.9, -0.4, 1.0, 1.0, 0.0, 0.0, 1.0,
+		-0.6,  0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+		-0.7,  0.5, 0.0, 1.0, 1.0, 0.5, 0.0,
 	};
 
 	const std::vector<uint32_t> indicies = {
@@ -410,7 +413,7 @@ void App::BuffersInitialize()
 	bufferDesc.mappedAtCreation = false;
 	WgpuBufferPtr wgpuBuffer = WgpuBufferPtr(wgpuDeviceCreateBuffer(m_wgpuCtx.device.get(), &bufferDesc), wgpuBufferRelease);
 
-	std::vector<size_t> attribComponents = {2, 3};
+	std::vector<size_t> attribComponents = {2, 3, 2};
 	m_verticies = WgpuBuffer(verticies.size(), sizeof(verticies[0]), std::move(attribComponents), std::move(wgpuBuffer));
 
 	// Index buffer
@@ -459,7 +462,7 @@ bool App::WgpuBuffer::SetInfo(size_t count, size_t componentSize, std::vector<si
 		if (i == 0)
 			m_attributeOffset[i] = 0;
 		else
-			m_attributeOffset[i] = (attributeComponents[i-1] * componentSize);
+			m_attributeOffset[i] = m_attributeOffset[i-1] + (attributeComponents[i-1] * componentSize);
 	}
 
 	m_attributeComponents = std::move(attributeComponents);
@@ -493,7 +496,7 @@ WgpuRenderPipelinePtr App::WgpuRenderPipelineInitialize()
 	);
 
 	// Vertex state
-	std::array<WGPUVertexAttribute, 2> vertAttribs;
+	std::array<WGPUVertexAttribute, 3> vertAttribs;
 	// pos
 	vertAttribs[0].shaderLocation = 0;
 	vertAttribs[0].format = WGPUVertexFormat_Float32x2;
@@ -502,6 +505,10 @@ WgpuRenderPipelinePtr App::WgpuRenderPipelineInitialize()
 	vertAttribs[1].shaderLocation = 1;
 	vertAttribs[1].format = WGPUVertexFormat_Float32x3;
 	vertAttribs[1].offset = m_verticies.m_attributeOffset[1];
+	// uv
+	vertAttribs[2].shaderLocation = 2;
+	vertAttribs[2].format = WGPUVertexFormat_Float32x2;
+	vertAttribs[2].offset = m_verticies.m_attributeOffset[2];
 
 	WGPUVertexBufferLayout vertBufLayout{};
 	vertBufLayout.attributeCount = vertAttribs.size();
@@ -569,15 +576,25 @@ WgpuRenderPipelinePtr App::WgpuRenderPipelineInitialize()
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
 	// Binding Layout
-	WGPUBindGroupLayoutEntry bindingLayout = wgpuUtils::getDefault<WGPUBindGroupLayoutEntry>();
+	std::array<WGPUBindGroupLayoutEntry, 2> bindingLayoutEntries;
+
+	WGPUBindGroupLayoutEntry &bindingLayout = bindingLayoutEntries[0];
+	bindingLayout = wgpuUtils::getDefault<WGPUBindGroupLayoutEntry>();
 	bindingLayout.binding = 0;
 	bindingLayout.visibility = WGPUShaderStage_Vertex | WGPUShaderStage_Fragment;
 	bindingLayout.buffer.type = WGPUBufferBindingType_Uniform;
 	bindingLayout.buffer.minBindingSize = sizeof(Uniforms);
 
+	WGPUBindGroupLayoutEntry &textureBindingLayout = bindingLayoutEntries[1];
+	textureBindingLayout = wgpuUtils::getDefault<WGPUBindGroupLayoutEntry>();
+	textureBindingLayout.binding = 1;
+	textureBindingLayout.visibility = WGPUShaderStage_Fragment;
+	textureBindingLayout.texture.sampleType = WGPUTextureSampleType_Float;
+	textureBindingLayout.texture.viewDimension = WGPUTextureViewDimension_2D;
+
 	WGPUBindGroupLayoutDescriptor bindGroupLayoutDesc{};
-	bindGroupLayoutDesc.entryCount = 1;
-	bindGroupLayoutDesc.entries = &bindingLayout;
+	bindGroupLayoutDesc.entryCount = bindingLayoutEntries.size();
+	bindGroupLayoutDesc.entries = bindingLayoutEntries.data();
 	WGPUBindGroupLayout bgLayout = wgpuDeviceCreateBindGroupLayout(m_wgpuCtx.device.get(), &bindGroupLayoutDesc);  // Needed to taked address of pointer
 	m_bindGroupLayout = WgpuBindGroupLayoutPtr(bgLayout, wgpuBindGroupLayoutRelease);
 
@@ -602,12 +619,14 @@ struct VertexInput
 {
 	@location(0) position: vec2f,
 	@location(1) color: vec3f,
+	@location(2) uv: vec2f,
 };
 
 struct VertexOutput
 {
 	@builtin(position) position: vec4f,
 	@location(0) color: vec3f,
+	@location(1) uv: vec2f,
 };
 
 struct Uniforms
@@ -618,6 +637,7 @@ struct Uniforms
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var texture: texture_2d<f32>;
 
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput
@@ -625,6 +645,7 @@ fn vs_main(in: VertexInput) -> VertexOutput
 	var out: VertexOutput;
 	out.position = vec4f(in.position.x, in.position.y * uniforms.ratio, 0.0, 1.0);
 	out.color = in.color;
+	out.uv = in.uv;
 
 	return out;
 }
@@ -632,7 +653,10 @@ fn vs_main(in: VertexInput) -> VertexOutput
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f  // output location is the ColorAttachment
 {
-	let color = in.color * uniforms.color.rgb;
+	//let color = in.color * uniforms.color.rgb;
+
+	let texelCoords = vec2i( in.uv * vec2f(textureDimensions(texture)) );
+	let color = textureLoad(texture, texelCoords, 0).rgb * uniforms.color.rgb;
 
 	// Gamma correction
 	let linearColor = pow(color, vec3f(uniforms.gamma));
@@ -644,20 +668,84 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f  // output location is the Co
 
 void App::WgpuBindGroupsInitialize()
 {
-	// Only need to specify binding texture and sampler if binding layout uses them
-	WGPUBindGroupEntry binding{};
+	std::array<WGPUBindGroupEntry, 2> bindings{};
+
+	WGPUBindGroupEntry &binding = bindings[0];
 	binding.binding = 0;
 	binding.buffer = m_uniformsBuffer.get();
 	binding.offset = 0;
 	binding.size = sizeof(Uniforms);
 
+	WGPUBindGroupEntry &textureBinding = bindings[1];
+	textureBinding.binding = 1;
+	textureBinding.textureView = m_texture.textureView.get();
+
 	WGPUBindGroupDescriptor bindGroupDesc{};
 	bindGroupDesc.layout = m_bindGroupLayout.get();
-	bindGroupDesc.entryCount = 1;
-	bindGroupDesc.entries = &binding;
+	bindGroupDesc.entryCount = bindings.size();
+	bindGroupDesc.entries = bindings.data();
 	m_bindGroup = WgpuBindGroupPtr(
 			wgpuDeviceCreateBindGroup(m_wgpuCtx.device.get(), &bindGroupDesc),
 			wgpuBindGroupRelease);
+}
+
+void App::WgpuTextureInitialize()
+{
+	WGPUTextureDescriptor textureDesc{};
+	textureDesc.dimension = WGPUTextureDimension_2D;
+	textureDesc.size = {256, 256, 1};
+	textureDesc.mipLevelCount = 1;
+	textureDesc.sampleCount = 1;
+	textureDesc.format = WGPUTextureFormat_RGBA8Unorm;
+	textureDesc.usage = WGPUTextureUsage_CopyDst | WGPUTextureUsage_TextureBinding;
+	textureDesc.viewFormatCount = 0;
+	textureDesc.viewFormats = nullptr;
+
+	m_texture.texture = WgpuTexturePtr(wgpuDeviceCreateTexture(m_wgpuCtx.device.get(), &textureDesc), wgpuTextureRelease);
+
+	WGPUTextureViewDescriptor viewDesc{};
+	viewDesc.aspect = WGPUTextureAspect_All;
+	viewDesc.baseArrayLayer = 0;
+	viewDesc.arrayLayerCount = 1;
+	viewDesc.baseMipLevel = 0;
+	viewDesc.mipLevelCount = 1;
+	viewDesc.dimension = WGPUTextureViewDimension_2D;
+	viewDesc.format = textureDesc.format;
+
+	m_texture.textureView = WgpuTextureViewPtr(wgpuTextureCreateView(m_texture.texture.get(), &viewDesc), wgpuTextureViewRelease);
+
+	// sample image data
+	std::vector<uint8_t> pixels(4 * textureDesc.size.width * textureDesc.size.height);
+	for (size_t i = 0; i < textureDesc.size.height; ++i)
+	{
+		for (size_t j = 0; j < textureDesc.size.width; ++j)
+		{
+			uint8_t *p = &pixels[4 * (i * textureDesc.size.width + j)];
+			p[0] = (uint8_t)i;
+			p[1] = (uint8_t)j;
+			p[2] = 255;
+			p[3] = 255;
+		}
+	}
+
+#if defined(EMSCRIPTEN_WEBGPU_DEPRECATED)
+	WGPUImageCopyTexture destination{};
+	WGPUTextureDataLayout source{};
+#else
+	WGPUTexelCopyTextureInfo destination{};
+	WGPUTexelCopyBufferLayout source{};
+#endif
+
+	destination.texture = m_texture.texture.get();
+	destination.mipLevel = 0;  // set to first (original) image mip level
+	destination.origin = {0, 0, 0};
+	destination.aspect = WGPUTextureAspect_All;  // only relevant for depth/stencil textures
+
+	source.offset = 0;
+	source.bytesPerRow = 4 * sizeof(pixels[0]) * textureDesc.size.width;
+	source.rowsPerImage = textureDesc.size.height;
+
+	wgpuQueueWriteTexture(m_wgpuCtx.queue.get(), &destination, pixels.data(), pixels.size(), &source, &textureDesc.size);
 }
 
 void App::Tick()
